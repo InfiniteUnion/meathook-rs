@@ -1,0 +1,23 @@
+# Example meathook configuration. Intervals/windows use humantime strings.
+# Secrets come from the environment, never from this file:
+#   HF_TOKEN   - HuggingFace access token with write access to the repo
+#   X_API_KEY  - optional data.gov.sg API key (these endpoints work keyless)
+
+spool_dir = "/var/lib/meathook/spool" # PVC mount on k8s
+
+[flush] # FlushPolicy for each pipeline's DiskSpool tier
+every = "1h"
+max_records = 50_000
+
+[sink.huggingface]
+repo = "zeon256/sg-weather"
+branch = "main"
+
+[collectors.air_temperature]
+interval = "1m"
+
+[collectors.rainfall]
+interval = "5m"
+
+[collectors.pm25]
+interval = "1h"
