@@ -1,0 +1,48 @@
+[package]
+name = "meathook-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Periodic API data collector with composable, durable sinks"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[lib]
+name = "meathook"
+path = "src/lib.rs"
+
+[features]
+default = ["parquet", "huggingface"]
+parquet = ["dep:arrow", "dep:parquet", "dep:serde_arrow"]
+huggingface = ["parquet", "dep:base64"]
+
+[dependencies]
+http = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+satay-runtime = { version = "0.1.2", features = ["json"] }
+satay-reqwest = "0.1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["serde", "formatting", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tokio-util = "0.7"
+tracing = "0.1"
+
+arrow = { version = "58", optional = true }
+parquet = { version = "58", optional = true }
+serde_arrow = { version = "0.14.1", features = ["arrow-58"], optional = true }
+base64 = { version = "0.22", optional = true }
+
+[dev-dependencies]
+anyhow = "1"
+bytes = "1"
+humantime-serde = "1"
+nea-rs = "0.1.1"
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
+toml = "0.9"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[example]]
+name = "nea_weather"
+required-features = ["huggingface"]
