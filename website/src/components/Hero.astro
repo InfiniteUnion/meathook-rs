@@ -1,0 +1,271 @@
+---
+import Reveal from './Reveal.astro';
+---
+
+<section class="relative min-h-screen flex flex-col items-center justify-center pt-14 px-6 overflow-hidden">
+  <div class="absolute inset-0 bg-grid opacity-[0.07]"></div>
+  <div
+    class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[500px] pointer-events-none"
+    style="background: radial-gradient(ellipse, rgba(127,29,29,0.12) 0%, transparent 70%)"
+  ></div>
+
+  <div class="relative z-10 flex flex-col items-center text-center max-w-5xl w-full">
+
+    <!-- Logo -->
+    <Reveal>
+      <img
+        src="/logo.png"
+        alt="meathook"
+        class="w-20 h-auto mb-8"
+        style="filter: drop-shadow(0 0 24px rgba(220,38,38,0.35))"
+      />
+    </Reveal>
+
+    <!-- Headline -->
+    <Reveal delay={60}>
+      <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-4 leading-tight">
+        <span class="text-red-500">Long-running</span>
+        <span class="text-zinc-50"> data collection<br class="hidden sm:block" /> pipelines for Rust.</span>
+      </h1>
+    </Reveal>
+
+    <!-- Sub-headline -->
+    <Reveal delay={110}>
+      <p class="text-lg sm:text-xl font-mono mb-14 text-zinc-500">
+        <span class="text-red-500">Write-ahead durable</span>
+        <span class="mx-2 text-zinc-700">·</span>Tower-style
+        <span class="mx-2 text-zinc-700">·</span>Panic-proof
+      </p>
+    </Reveal>
+
+    <!-- Pipeline diagram -->
+    <Reveal delay={180}>
+      <div class="w-full overflow-x-auto pb-2">
+        <div class="flex items-start justify-center gap-0 min-w-max mx-auto px-4">
+
+          <!-- Node: tick -->
+          <div class="flex flex-col items-center">
+            <span class="node-label">trigger</span>
+            <div class="node-box">
+              <div class="node-title">tick</div>
+              <div class="node-sub">every 60s</div>
+            </div>
+            <div class="h-7"></div>
+          </div>
+
+          <!-- Connector 1 -->
+          <div class="connector self-center pb-7">
+            <div class="connector-line" style="animation-delay: 0s"></div>
+            <svg class="arrow-head" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/>
+            </svg>
+          </div>
+
+          <!-- Node: Collector -->
+          <div class="flex flex-col items-center">
+            <span class="node-label">collect</span>
+            <div class="node-box">
+              <div class="node-title">Collector</div>
+              <div class="node-sub">collect()</div>
+            </div>
+            <div class="h-7 flex items-start pt-2">
+              <span class="annotation">↓ dedupe</span>
+            </div>
+          </div>
+
+          <!-- Connector 2 -->
+          <div class="connector self-center pb-7">
+            <div class="connector-line" style="animation-delay: 0.45s"></div>
+            <svg class="arrow-head" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/>
+            </svg>
+          </div>
+
+          <!-- Node: DiskSpool (durable, highlighted) -->
+          <div class="flex flex-col items-center">
+            <span class="node-label" style="color: #7f1d1d">spool</span>
+            <div class="node-box node-box--durable">
+              <div class="node-title">DiskSpool</div>
+              <div class="node-sub">fsync'd</div>
+            </div>
+            <div class="h-7 flex items-start pt-2">
+              <span class="annotation">↑ replay on crash</span>
+            </div>
+          </div>
+
+          <!-- Connector 3 -->
+          <div class="connector self-center pb-7">
+            <div class="connector-line" style="animation-delay: 0.9s"></div>
+            <svg class="arrow-head" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/>
+            </svg>
+          </div>
+
+          <!-- Node: HfSink -->
+          <div class="flex flex-col items-center">
+            <span class="node-label">sink</span>
+            <div class="node-box">
+              <div class="node-title">HfSink</div>
+              <div class="node-sub">parquet</div>
+            </div>
+            <div class="h-7 flex items-start pt-2">
+              <span class="annotation">HuggingFace</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </Reveal>
+
+    <!-- CTAs -->
+    <Reveal delay={260}>
+      <div class="flex flex-wrap items-center justify-center gap-3 mt-12">
+        <a
+          href="https://crates.io/crates/meathook-rs"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="px-7 py-3.5 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-semibold text-base rounded transition-colors"
+        >
+          crates.io ↗
+        </a>
+        <a
+          href="https://docs.rs/meathook-rs"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="px-7 py-3.5 border border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-zinc-50 font-semibold text-base rounded transition-colors"
+        >
+          docs.rs ↗
+        </a>
+        <a
+          href="https://github.com/zeon256/meathook-rs"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="px-7 py-3.5 border border-zinc-700 hover:border-zinc-500 text-zinc-300 hover:text-zinc-50 font-semibold text-base rounded transition-colors"
+        >
+          GitHub ↗
+        </a>
+      </div>
+    </Reveal>
+
+    <!-- Badges -->
+    <Reveal delay={320}>
+      <div class="flex flex-wrap items-center justify-center gap-3 mt-5">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-full text-sm text-zinc-500 font-mono">
+          <span class="w-1.5 h-1.5 bg-red-600 rounded-full"></span>
+          v0.1.0
+        </span>
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-full text-sm text-zinc-500 font-mono">
+          Apache-2.0 / MIT
+        </span>
+      </div>
+    </Reveal>
+
+  </div>
+
+  <!-- Scroll cue -->
+  <div class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 text-zinc-700 animate-bounce">
+    <span class="text-xs tracking-[0.2em] uppercase font-mono">scroll</span>
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+    </svg>
+  </div>
+</section>
+
+<style>
+  /* ── Node boxes ─────────────────────────────────── */
+  .node-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #52525b; /* zinc-600 */
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .node-box {
+    background: #18181b;
+    border: 1px solid rgba(63, 63, 70, 0.8); /* zinc-700 */
+    border-radius: 12px;
+    padding: 14px 20px;
+    min-width: 120px;
+    text-align: center;
+  }
+
+  .node-box--durable {
+    border-color: rgba(127, 29, 29, 0.7);
+    box-shadow: 0 0 20px rgba(127, 29, 29, 0.15);
+  }
+
+  .node-title {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: #f4f4f5; /* zinc-100 */
+  }
+
+  .node-sub {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #52525b; /* zinc-600 */
+    margin-top: 5px;
+  }
+
+  .annotation {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #3f3f46; /* zinc-700 */
+  }
+
+  /* ── Connectors ─────────────────────────────────── */
+  .connector {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+  }
+
+  .connector-line {
+    position: relative;
+    width: 40px;
+    height: 1px;
+    background: #3f3f46;
+    overflow: hidden;
+  }
+
+  .connector-line::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      #dc2626 50%,
+      transparent 100%
+    );
+    animation: flow-pulse 3s linear infinite;
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+
+  .arrow-head {
+    width: 12px;
+    height: 12px;
+    color: #dc2626;
+    flex-shrink: 0;
+  }
+
+  /*
+    Each connector is active for ~0.4s out of a 3s cycle.
+    C1 (delay 0s)  : active 0–0.4s
+    C2 (delay 0.5s): active 0.5–0.9s
+    C3 (delay 1.0s): active 1.0–1.4s
+    Pause 1.4–3s, then repeat — one sweep, one gap.
+  */
+  @keyframes flow-pulse {
+    0%    { transform: translateX(-120%); opacity: 1; }
+    13%   { transform: translateX(220%);  opacity: 1; }
+    14%   { transform: translateX(220%);  opacity: 0; }
+    14.1% { transform: translateX(-120%); opacity: 0; }
+    100%  { transform: translateX(-120%); opacity: 0; }
+  }
+</style>

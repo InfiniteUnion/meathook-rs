@@ -1,0 +1,121 @@
+@import "tailwindcss";
+@import "@arborium/arborium/themes/base.css";
+@import "@arborium/arborium/themes/one-dark.css";
+
+@theme {
+  --color-crimson: #dc2626;
+  --color-crimson-bright: #ef4444;
+  --color-crimson-dim: #991b1b;
+  --color-crimson-dark: #7f1d1d;
+  --color-surface: #18181b;
+  --color-border: #27272a;
+  --color-muted: #71717a;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #09090b;
+  color: #fafafa;
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(220, 38, 38, 0.3);
+  color: #fafafa;
+}
+
+/* Subtle grid texture for hero */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, #27272a 1px, transparent 1px),
+    linear-gradient(to bottom, #27272a 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #09090b; }
+::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #dc2626; }
+
+/* ── Arborium code blocks ─────────────────────────────────────── */
+/* Always use dark theme vars — site is dark-only */
+pre[data-arborium] {
+  color-scheme: dark;
+  background: transparent;
+  color: var(--arb-fg-dark);
+  --arb-bg-light: var(--arb-bg-dark);
+  --arb-fg-light: var(--arb-fg-dark);
+  --arb-at-light: var(--arb-at-dark);
+  --arb-co-light: var(--arb-co-dark);
+  --arb-cb-light: var(--arb-cb-dark);
+  --arb-fb-light: var(--arb-fb-dark);
+  --arb-f-light: var(--arb-f-dark);
+  --arb-fm-light: var(--arb-fm-dark);
+  --arb-k-light: var(--arb-k-dark);
+  --arb-kc-light: var(--arb-kc-dark);
+  --arb-ko-light: var(--arb-ko-dark);
+  --arb-kd-light: var(--arb-kd-dark);
+  --arb-ke-light: var(--arb-ke-dark);
+  --arb-kf-light: var(--arb-kf-dark);
+  --arb-ki-light: var(--arb-ki-dark);
+  --arb-kp-light: var(--arb-kp-dark);
+  --arb-kr-light: var(--arb-kr-dark);
+  --arb-kt-light: var(--arb-kt-dark);
+  --arb-ky-light: var(--arb-ky-dark);
+  --arb-o-light: var(--arb-o-dark);
+  --arb-pr-light: var(--arb-pr-dark);
+  --arb-p-light: var(--arb-p-dark);
+  --arb-pb-light: var(--arb-pb-dark);
+  --arb-pd-light: var(--arb-pd-dark);
+  --arb-ps-light: var(--arb-ps-dark);
+  --arb-s-light: var(--arb-s-dark);
+  --arb-ss-light: var(--arb-ss-dark);
+  --arb-tg-light: var(--arb-tg-dark);
+  --arb-td-light: var(--arb-td-dark);
+  --arb-te-light: var(--arb-te-dark);
+  --arb-t-light: var(--arb-t-dark);
+  --arb-tb-light: var(--arb-tb-dark);
+  --arb-tq-light: var(--arb-tq-dark);
+  --arb-v-light: var(--arb-v-dark);
+  --arb-vb-light: var(--arb-vb-dark);
+  --arb-vp-light: var(--arb-vp-dark);
+  --arb-c-light: var(--arb-c-dark);
+  --arb-cd-light: var(--arb-cd-dark);
+  --arb-m-light: var(--arb-m-dark);
+  --arb-l-light: var(--arb-l-dark);
+  --arb-n-light: var(--arb-n-dark);
+  --arb-tl-light: var(--arb-tl-dark);
+  --arb-em-light-style: var(--arb-em-dark-style);
+  --arb-st-light-weight: var(--arb-st-dark-weight);
+  --arb-tu-light: var(--arb-tu-dark);
+  --arb-tu-light-decoration: var(--arb-tu-dark-decoration);
+  --arb-tr-light: var(--arb-tr-dark);
+  --arb-se-light: var(--arb-se-dark);
+  --arb-tt-light: var(--arb-tt-dark);
+  --arb-tt-light-weight: var(--arb-tt-dark-weight);
+  --arb-tx-light-decoration: var(--arb-tx-dark-decoration);
+  --arb-sp-light: var(--arb-sp-dark);
+  --arb-in-light: var(--arb-in-dark);
+  --arb-sc-light: var(--arb-sc-dark);
+  --arb-rp-light: var(--arb-rp-dark);
+  --arb-cn-light: var(--arb-cn-dark);
+  --arb-ex-light: var(--arb-ex-dark);
+  --arb-pp-light: var(--arb-pp-dark);
+  --arb-ch-light: var(--arb-ch-dark);
+  --arb-cs-light: var(--arb-cs-dark);
+  --arb-vm-light: var(--arb-vm-dark);
+  --arb-fd-light: var(--arb-fd-dark);
+  --arb-tf-light: var(--arb-tf-dark);
+  --arb-fc-light: var(--arb-fc-dark);
+  --arb-km-light: var(--arb-km-dark);
+  --arb-dr-light: var(--arb-dr-dark);
+  --arb-rx-light: var(--arb-rx-dark);
+}

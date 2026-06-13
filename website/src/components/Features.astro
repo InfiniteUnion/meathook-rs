@@ -1,0 +1,104 @@
+---
+import Reveal from './Reveal.astro';
+
+const features = [
+  {
+    label: 'Durable',
+    title: 'Write-ahead spool',
+    description:
+      'Every record is fsynced to a segment file before ingest returns. Survive SIGKILL with at most one torn record — remaining segments replay on restart.',
+    icon: `<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>`,
+    featured: false,
+  },
+  {
+    label: 'Composable',
+    title: 'Tower-style layers',
+    description:
+      'Stack Buffered → DiskSpool → HfSink like tower middleware. SinkExt provides fluent combinators. Fan-out to multiple sinks with Tee.',
+    icon: `<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 6h16M4 12h16M4 18h7"/></svg>`,
+    featured: false,
+  },
+  {
+    label: 'Resilient',
+    title: 'Panic recovery',
+    description:
+      'Pipelines are factory closures. When a task panics, the supervisor rebuilds the entire stack — including crash recovery in durable layers — with exponential backoff.',
+    icon: `<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`,
+    featured: true,
+  },
+  {
+    label: 'Native',
+    title: 'HuggingFace parquet',
+    description:
+      'Commit one parquet file per time window via a sans-IO CommitAction. Hive-partitioned paths keep the dataset viewer happy. Serde structs are all you need.',
+    icon: `<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>`,
+    featured: false,
+  },
+  {
+    label: 'Shutdown',
+    title: 'Graceful drain',
+    description:
+      'SIGTERM flushes every sink layer in every pipeline before the process exits. Combine with a k8s PVC for zero-data-loss collection across restarts.',
+    icon: `<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 3l14 9-14 9V3z"/></svg>`,
+    featured: false,
+  },
+  {
+    label: 'Type-safe',
+    title: 'Concrete errors',
+    description:
+      'Thiserror enums end to end. Every trait carries an associated Error type — no Box<dyn Error>, no string-based failures. Compiler-checked from collector to sink.',
+    icon: `<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>`,
+    featured: false,
+  },
+];
+---
+
+<section class="py-28 px-6 border-t border-zinc-800/60">
+  <div class="max-w-6xl mx-auto">
+    <Reveal>
+      <div class="mb-16">
+        <span class="text-red-600 text-xs font-mono tracking-[0.2em] uppercase">Capabilities</span>
+        <h2 class="text-5xl font-bold mt-2 text-zinc-50">Built to last</h2>
+      </div>
+    </Reveal>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {
+        features.map((f, i) => (
+          <Reveal delay={i * 50}>
+            <div
+              class:list={[
+                'h-full p-6 rounded-xl border transition-all duration-300 group hover:-translate-y-0.5',
+                f.featured
+                  ? 'border-red-800/60 bg-red-950/20 hover:border-red-700/60'
+                  : 'border-zinc-800 bg-zinc-900/40 hover:border-zinc-700',
+              ]}
+            >
+              <div
+                class:list={[
+                  'w-9 h-9 rounded-lg flex items-center justify-center mb-5',
+                  f.featured
+                    ? 'bg-red-900/40 text-red-400'
+                    : 'bg-zinc-800 text-zinc-400',
+                ]}
+                set:html={f.icon}
+              />
+              <div class="mb-1">
+                <span
+                  class:list={[
+                    'text-[10px] font-mono tracking-widest uppercase',
+                    f.featured ? 'text-red-500' : 'text-zinc-600',
+                  ]}
+                >
+                  {f.label}
+                </span>
+              </div>
+              <h3 class="text-zinc-100 text-xl font-semibold mb-2">{f.title}</h3>
+              <p class="text-zinc-500 text-lg leading-relaxed">{f.description}</p>
+            </div>
+          </Reveal>
+        ))
+      }
+    </div>
+  </div>
+</section>

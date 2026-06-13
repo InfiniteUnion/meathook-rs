@@ -1,0 +1,118 @@
+---
+import { highlight } from '@arborium/arborium';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import Reveal from './Reveal.astro';
+
+const nm = join(process.cwd(), 'node_modules');
+
+const arboriumConfig = {
+  logger: { debug() {}, warn: console.warn, error: console.error },
+  resolveHostJs: () => import('@arborium/arborium/arborium_host.js'),
+  resolveHostWasm: () => readFile(join(nm, '@arborium/arborium/dist/arborium_host_bg.wasm')),
+  resolveJs: () => import('@arborium/rust/grammar.js'),
+  resolveWasm: () => readFile(join(nm, '@arborium/rust/grammar_bg.wasm')),
+};
+
+const code = `use meathook::{FlushPolicy, HfSink, Meathook, Pipeline, SatayCollector, SinkExt as _, runtime};
+use satay_reqwest::ReqwestActionExt as _;
+use std::{time::Duration, env};
+use reqwest::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), runtime::RuntimeError> {
+    let client = Client::new();
+    let token = env::var("HF_TOKEN").expect("HF_TOKEN must be set");
+
+    Meathook::builder()
+        .pipeline(move || {
+            // Factory re-runs after a panic, rebuilding the whole stack
+            // (and re-running spool crash recovery automatically).
+            let collector = SatayCollector::new(
+                "air_temperature",
+                client.clone(),
+                move |client| {
+                    let api = nea_rs::Api::new();
+                    async move { api.air_temperature().send_with(&client).await }
+                },
+                |response| flatten(response), // typed response -> Vec<MyRecord>
+            );
+
+            // Durable: every tick fsynced to disk; hourly parquet on HuggingFace
+            let sink = HfSink::new(client.clone(), "you/your-dataset", token.clone())
+                .spooled("/var/lib/meathook/spool/air_temperature", FlushPolicy::hourly());
+
+            Pipeline::new(collector, sink, Duration::from_secs(60))
+                .with_key_fn(|r: &MyRecord| (r.station_id.clone(), r.timestamp.clone()))
+        })
+        .run()
+        .await
+}`;
+
+const highlighted = await highlight('rust', code, arboriumConfig);
+---
+
+<section class="py-28 px-6 border-t border-zinc-800/60">
+  <div class="max-w-6xl mx-auto">
+    <Reveal>
+      <div class="mb-12">
+        <span class="text-red-600 text-xs font-mono tracking-[0.2em] uppercase">Quick Start</span>
+        <h2 class="text-5xl font-bold mt-2 text-zinc-50">
+          Three layers, one <code
+            class="text-red-500"
+            style="font-family: var(--font-mono)">.run()</code
+          >
+        </h2>
+        <p class="text-zinc-400 mt-3 text-base">
+          Add to <code
+            class="text-zinc-300 bg-zinc-800/80 px-1.5 py-0.5 rounded text-sm"
+            style="font-family: var(--font-mono)">Cargo.toml</code
+          >:
+          <code
+            class="text-zinc-300 bg-zinc-800/80 px-1.5 py-0.5 rounded text-sm ml-1"
+            style="font-family: var(--font-mono)">meathook-rs = "0.1"</code
+          >
+        </p>
+      </div>
+    </Reveal>
+
+    <Reveal delay={60}>
+      <div class="bg-zinc-900/80 border border-zinc-800 rounded-xl overflow-hidden">
+        <!-- Terminal chrome -->
+        <div
+          class="flex items-center justify-between px-5 py-3.5 bg-zinc-800/40 border-b border-zinc-800"
+        >
+          <div class="flex items-center gap-3">
+            <div class="flex gap-1.5">
+              <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+              <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+              <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+            </div>
+            <span class="text-xs text-zinc-500" style="font-family: var(--font-mono)">main.rs</span>
+          </div>
+          <span class="text-xs text-zinc-600" style="font-family: var(--font-mono)">Rust</span>
+        </div>
+        <!-- Arborium-highlighted code -->
+        <div class="overflow-x-auto">
+          <pre
+            data-arborium
+            data-arborium-language="rust"
+            class="p-6 text-lg leading-relaxed"
+            style="font-family: var(--font-mono)"><code set:html={highlighted}></code></pre>
+        </div>
+      </div>
+    </Reveal>
+
+    <Reveal delay={100}>
+      <p class="text-zinc-500 text-base mt-5">
+        See <a
+          href="https://github.com/zeon256/meathook-rs/blob/main/examples/nea_weather.rs"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-zinc-400 hover:text-zinc-200 underline underline-offset-2 transition-colors"
+          >examples/nea_weather.rs</a
+        > for three NEA weather pipelines with TOML config and graceful shutdown.
+      </p>
+    </Reveal>
+  </div>
+</section>

@@ -1,0 +1,94 @@
+---
+import Reveal from './Reveal.astro';
+---
+
+<section class="py-28 px-6 border-t border-zinc-800/60">
+  <div class="max-w-6xl mx-auto">
+    <Reveal>
+      <div class="mb-16">
+        <span class="text-red-600 text-xs font-mono tracking-[0.2em] uppercase">Architecture</span>
+        <h2 class="text-5xl font-bold mt-2 text-zinc-50">How it works</h2>
+        <p class="text-zinc-500 mt-4 max-w-lg text-lg leading-relaxed">
+          No YAML plugin system. Wire collectors and sinks in code by implementing two traits.
+          Sinks compose like tower layers.
+        </p>
+      </div>
+    </Reveal>
+
+    <div class="grid lg:grid-cols-5 gap-8 items-start">
+      <!-- Pipeline diagram -->
+      <Reveal class="lg:col-span-3" delay={60}>
+        <div class="bg-zinc-900/80 border border-zinc-800 rounded-xl overflow-hidden">
+          <div class="flex items-center gap-2 px-5 py-3.5 bg-zinc-800/40 border-b border-zinc-800">
+            <div class="flex gap-1.5">
+              <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+              <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+              <div class="w-3 h-3 rounded-full bg-zinc-700"></div>
+            </div>
+            <span class="ml-2 text-xs text-zinc-600" style="font-family: var(--font-mono)">pipeline.txt</span>
+          </div>
+          <div class="p-6 overflow-x-auto">
+            <pre class="text-sm leading-loose" style="font-family: var(--font-mono)"><code><span class="text-zinc-500">tick(interval)</span> <span class="text-red-500">──►</span> <span class="text-zinc-200">Collector::collect()</span> <span class="text-red-500">──►</span> <span class="text-zinc-400">Vec&lt;Record&gt;</span> <span class="text-red-500">──►</span> <span class="text-zinc-200">Sink::ingest(...)</span>
+                                                                 <span class="text-zinc-700">│</span>
+                          <span class="text-zinc-600">the "sink" is a composed stack of layers:</span>
+                                                                 <span class="text-zinc-700">│</span>
+              <span class="text-zinc-300">Buffered</span><span class="text-zinc-600">(mem, flush: 5m | 10k records)</span>         <span class="text-zinc-700">│  <span class="text-zinc-600">tier 1</span></span>
+                           <span class="text-zinc-300">DiskSpool</span><span class="text-zinc-600">(flush: 1h)</span>              <span class="text-zinc-700">│  <span class="text-zinc-600">tier 2</span></span>
+                      <span class="text-red-500">HfSink</span><span class="text-zinc-600">(parquet encode+commit)</span>          <span class="text-red-500">▼  terminal</span></code></pre>
+          </div>
+        </div>
+      </Reveal>
+
+      <!-- Steps -->
+      <div class="lg:col-span-2 flex flex-col gap-10">
+        <Reveal delay={100}>
+          <div class="flex gap-5">
+            <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-red-950/60 border border-red-900/40 flex items-center justify-center">
+              <span class="text-red-500 text-sm font-mono font-bold">01</span>
+            </div>
+            <div>
+              <h3 class="text-zinc-100 text-xl font-semibold mb-2">Collector</h3>
+              <p class="text-zinc-500 text-lg leading-relaxed">
+                Produces a batch of records per tick.
+                <code class="text-zinc-300 bg-zinc-800 px-1.5 py-0.5 rounded text-sm mx-0.5">SatayCollector</code>
+                adapts any satay-generated client in one closure.
+              </p>
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal delay={150}>
+          <div class="flex gap-5">
+            <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-red-950/60 border border-red-900/40 flex items-center justify-center">
+              <span class="text-red-500 text-sm font-mono font-bold">02</span>
+            </div>
+            <div>
+              <h3 class="text-zinc-100 text-xl font-semibold mb-2">Sink Layers</h3>
+              <p class="text-zinc-500 text-lg leading-relaxed">
+                Each layer owns records until its
+                <code class="text-zinc-300 bg-zinc-800 px-1.5 py-0.5 rounded text-sm mx-0.5">FlushPolicy</code>
+                fires — by interval or record count. Fan-out via
+                <code class="text-zinc-300 bg-zinc-800 px-1.5 py-0.5 rounded text-sm mx-0.5">Tee</code>.
+              </p>
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal delay={200}>
+          <div class="flex gap-5">
+            <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-red-950/60 border border-red-900/40 flex items-center justify-center">
+              <span class="text-red-500 text-sm font-mono font-bold">03</span>
+            </div>
+            <div>
+              <h3 class="text-zinc-100 text-xl font-semibold mb-2">Meathook Supervisor</h3>
+              <p class="text-zinc-500 text-lg leading-relaxed">
+                One tokio task per pipeline. Panicked pipelines are rebuilt from their factory
+                with exponential backoff. SIGTERM drains all sinks before exit.
+              </p>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </div>
+  </div>
+</section>
