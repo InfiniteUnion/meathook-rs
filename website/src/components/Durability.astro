@@ -1,0 +1,81 @@
+---
+const failures = [
+  {
+    event: 'SIGKILL / OOM',
+    outcome: 'Leftover segments replay on next start',
+    loss: '≤ 1 torn record',
+    tone: 'pale-red',
+  },
+  {
+    event: 'Task panic',
+    outcome: 'Supervisor respawns from factory',
+    loss: 'none',
+    tone: 'pale-green',
+  },
+  {
+    event: 'Sink outage',
+    outcome: 'Segments accumulate, retried each firing',
+    loss: 'none',
+    tone: 'pale-blue',
+  },
+  {
+    event: 'SIGTERM',
+    outcome: 'Runtime drains every sink stack',
+    loss: 'none',
+    tone: 'pale-green',
+  },
+  {
+    event: 'Disk lost',
+    outcome: 'Spool gone, unflushed data lost',
+    loss: 'use a PVC on k8s',
+    tone: 'pale-yellow',
+  },
+];
+
+const toneClasses: Record<string, string> = {
+  'pale-red': 'bg-red-950/60 text-red-300',
+  'pale-green': 'bg-green-950/60 text-green-300',
+  'pale-blue': 'bg-sky-950/60 text-sky-300',
+  'pale-yellow': 'bg-amber-950/60 text-amber-300',
+};
+---
+
+<section id="durability" class="border-b border-line">
+  <div class="mx-auto max-w-6xl px-5 py-20 lg:px-8 lg:py-28">
+    <h2 class="reveal text-3xl font-semibold tracking-tight text-ink md:text-4xl">
+      Durability is the default path
+    </h2>
+    <p class="reveal mt-4 max-w-2xl text-base leading-relaxed text-muted">
+      DiskSpool appends JSON lines and fsyncs before returning. Segments delete only after the downstream sink accepts them. Paths are deterministic per window so replays stay idempotent.
+    </p>
+
+    <div class="reveal mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {failures.slice(0, 3).map((item) => (
+        <article class="rounded border border-line bg-surface p-6">
+          <span class:list={['inline-block rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide', toneClasses[item.tone]]}>
+            {item.event}
+          </span>
+          <p class="mt-4 text-sm leading-relaxed text-ink">{item.outcome}</p>
+          <p class="mt-3 font-mono text-xs text-muted">Data lost: {item.loss}</p>
+        </article>
+      ))}
+    </div>
+
+    <div class="reveal mt-4 grid gap-4 sm:grid-cols-2">
+      {failures.slice(3).map((item) => (
+        <article class="rounded border border-line bg-surface p-6 lg:col-span-1">
+          <span class:list={['inline-block rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide', toneClasses[item.tone]]}>
+            {item.event}
+          </span>
+          <p class="mt-4 text-sm leading-relaxed text-ink">{item.outcome}</p>
+          <p class="mt-3 font-mono text-xs text-muted">Data lost: {item.loss}</p>
+        </article>
+      ))}
+      <article class="rounded border border-dashed border-line-strong bg-canvas p-6 lg:col-span-1">
+        <p class="font-mono text-xs uppercase tracking-wide text-muted">Storage path</p>
+        <p class="mt-3 font-mono text-sm text-ink">data/{'{pipeline}'}/{'{YYYY-MM-DD}'}/{'{HH}'}.parquet</p>
+        <p class="mt-3 text-sm text-muted">Hive-style partitioning keeps the HuggingFace dataset viewer happy.</p>
+      </article>
+    </div>
+  </div>
+</section>

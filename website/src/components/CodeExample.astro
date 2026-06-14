@@ -1,0 +1,180 @@
+---
+import { highlightRust } from '../lib/arborium.mjs';
+
+const stackCode = `use std::path::PathBuf;
+
+use meathook::{DiskSpool, FlushPolicy, HfSink, SinkExt as _};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
+#[derive(Clone)]
+struct Ctx {
+    client: reqwest::Client,
+    repo: String,
+    token: String,
+    spool_dir: PathBuf,
+    policy: FlushPolicy,
+}
+
+impl Ctx {
+    fn spooled_hf<R>(&self, pipeline: &str) -> DiskSpool<R, HfSink<R>>
+    where
+        R: Serialize + DeserializeOwned + Send + 'static,
+    {
+        // terminal sink (innermost)
+        HfSink::new(self.client.clone(), self.repo.clone(), self.token.clone())
+            // tier 2: durable write-ahead spool, per-pipeline path
+            .spooled(self.spool_dir.join(pipeline), self.policy)
+    }
+}`;
+
+const mainCode = `use std::time::Duration;
+
+use meathook::{Meathook, Pipeline, SatayCollector};
+
+fn air_temperature(ctx: &Ctx) -> impl Fn() -> Pipeline<_, _> + Send + 'static {
+    let ctx = ctx.clone();
+    move || {
+        let collector = SatayCollector::new(
+            "air_temperature",
+            ctx.client.clone(),
+            |_| async { /* poll API */ },
+            |response| flatten(response),
+        );
+        Pipeline::new(
+            collector,
+            ctx.spooled_hf("air_temperature"),
+            Duration::from_secs(60),
+        )
+        .with_key_fn(|r: &Reading| (r.station_id.clone(), r.timestamp.clone()))
+    }
+}
+
+fn rainfall(ctx: &Ctx) -> impl Fn() -> Pipeline<_, _> + Send + 'static {
+    let ctx = ctx.clone();
+    move || {
+        let collector = SatayCollector::new("rainfall", ctx.client.clone(), /* ... */);
+        Pipeline::new(collector, ctx.spooled_hf("rainfall"), Duration::from_secs(300))
+    }
+}
+
+fn pm25(ctx: &Ctx) -> impl Fn() -> Pipeline<_, _> + Send + 'static {
+    let ctx = ctx.clone();
+    move || {
+        let collector = SatayCollector::new("pm25", ctx.client.clone(), /* ... */);
+        Pipeline::new(collector, ctx.spooled_hf("pm25"), Duration::from_secs(60))
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), meathook::runtime::RuntimeError> {
+    let ctx = Ctx { /* client, repo, token, spool_dir, policy */ };
+
+    Meathook::builder()
+        .pipeline(air_temperature(&ctx))
+        .pipeline(rainfall(&ctx))
+        .pipeline(pm25(&ctx))
+        .run()
+        .await
+}`;
+
+const [stackHighlighted, mainHighlighted] = await Promise.all([
+  highlightRust(stackCode),
+  highlightRust(mainCode),
+]);
+
+const traits = [
+  {
+    title: 'Layer stack',
+    body: 'Terminal sink wrapped by .spooled(). Each tier owns records until its FlushPolicy fires.',
+  },
+  {
+    title: 'Pipeline factory',
+    body: 'One named fn per API returning a factory closure. Rebuilt after panic, spool replays on restart.',
+  },
+  {
+    title: 'Meathook runtime',
+    body: '.pipeline() registers each factory. One tokio task each, drains on SIGTERM.',
+  },
+];
+
+const docLinks = [
+  { label: 'Collector trait', href: 'https://docs.rs/meathook-rs/latest/meathook/collector/trait.Collector.html' },
+  { label: 'Sink trait', href: 'https://docs.rs/meathook-rs/latest/meathook/sink/trait.Sink.html' },
+  { label: 'FlushPolicy', href: 'https://docs.rs/meathook-rs/latest/meathook/layer/struct.FlushPolicy.html' },
+];
+
+const panels = [
+  { filename: 'stack.rs', highlighted: stackHighlighted },
+  { filename: 'main.rs', highlighted: mainHighlighted },
+];
+---
+
+<section id="example" class="border-b border-line">
+  <div class="mx-auto max-w-6xl px-5 py-20 lg:px-8 lg:py-28">
+    <div class="reveal max-w-2xl">
+      <h2 class="text-3xl font-semibold tracking-tight text-ink md:text-4xl">
+        Compose layers, wire pipelines
+      </h2>
+      <p class="mt-4 text-base leading-relaxed text-muted">
+        Panel one builds the sink stack: terminal inward, durable layers wrap outward.
+        Panel two registers one factory fn per API; the runtime supervises them all.
+        Use <code class="rounded bg-code px-1.5 py-0.5 font-mono text-xs text-ink">--no-default-features</code> for core-only builds; HfSink is optional.
+      </p>
+    </div>
+
+    <div class="reveal mt-10 overflow-hidden rounded border border-line bg-canvas">
+      {panels.map((panel, index) => (
+        <div class:list={[index > 0 && 'border-t border-line']}>
+          <div class="flex items-center justify-between gap-4 border-b border-line px-5 py-3.5 lg:px-6">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-full bg-line-strong" aria-hidden="true"></span>
+              <span class="h-2.5 w-2.5 rounded-full bg-line-strong" aria-hidden="true"></span>
+              <span class="h-2.5 w-2.5 rounded-full bg-line-strong" aria-hidden="true"></span>
+              <span class="ml-2 font-mono text-sm text-faint">{panel.filename}</span>
+            </div>
+            <span class="font-mono text-xs text-muted">Rust</span>
+          </div>
+
+          <pre
+            data-arborium
+            data-arborium-language="rust"
+            class="overflow-x-auto px-5 py-6 text-sm leading-[1.7] lg:px-8 lg:py-8 lg:text-[15px]"
+          ><code set:html={panel.highlighted}></code></pre>
+        </div>
+      ))}
+
+      <div class="grid gap-px border-t border-line bg-line md:grid-cols-3">
+        {traits.map((trait) => (
+          <article class="bg-surface px-5 py-6 lg:px-6 lg:py-7">
+            <h3 class="font-mono text-sm font-semibold text-hook">{trait.title}</h3>
+            <p class="mt-2.5 text-sm leading-relaxed text-muted">{trait.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+
+    <div class="reveal mt-8 flex flex-wrap items-center gap-3">
+      {docLinks.map((link) => (
+        <a
+          href={link.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="rounded border border-line bg-surface px-4 py-2 font-mono text-xs text-muted transition-colors hover:border-line-strong hover:text-ink"
+        >
+          {link.label}
+        </a>
+      ))}
+      <span class="hidden h-4 w-px bg-line sm:block" aria-hidden="true"></span>
+      <p class="text-sm text-muted">
+        Full reference with TOML config:
+        <a
+          href="https://github.com/zeon256/meathook-rs/blob/main/examples/nea_weather.rs"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-ink underline decoration-line-strong underline-offset-2 transition-colors hover:text-hook"
+        >examples/nea_weather.rs</a>.
+      </p>
+    </div>
+  </div>
+</section>

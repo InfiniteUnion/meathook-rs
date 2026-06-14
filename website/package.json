@@ -1,0 +1,23 @@
+{
+  "name": "meathook-website",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@arborium/arborium": "^2.18.0",
+    "@arborium/rust": "^2.18.0",
+    "@fontsource/geist-sans": "^5.2.5",
+    "@fontsource/iosevka": "^5.2.5",
+    "@tailwindcss/vite": "^4.3.1",
+    "astro": "^6.4.6",
+    "tailwindcss": "^4.3.1"
+  }
+}

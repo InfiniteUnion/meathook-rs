@@ -1,0 +1,150 @@
+@import "tailwindcss";
+@import "@fontsource/geist-sans/latin-400.css";
+@import "@fontsource/geist-sans/latin-500.css";
+@import "@fontsource/geist-sans/latin-600.css";
+@import "@fontsource/geist-sans/latin-700.css";
+@import "@fontsource/iosevka/latin-400.css";
+@import "@fontsource/iosevka/latin-500.css";
+@import "@fontsource/iosevka/latin-600.css";
+@import "@arborium/arborium/themes/base.css";
+@import "@arborium/arborium/themes/one-dark.css";
+
+@theme {
+  --color-canvas: #0c0a09;
+  --color-surface: #1c1917;
+  --color-ink: #fafaf9;
+  --color-muted: #a8a29e;
+  --color-faint: #78716c;
+  --color-line: #292524;
+  --color-line-strong: #44403c;
+  --color-hook: #ef4444;
+  --color-hook-soft: #2a1212;
+  --color-hook-muted: #f87171;
+  --color-code: #292524;
+  --font-sans: "Geist Sans", system-ui, sans-serif;
+  --font-mono: "Iosevka", ui-monospace, monospace;
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-hook) 35%, transparent);
+  color: var(--color-ink);
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 600ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+pre[data-arborium] {
+  color-scheme: dark;
+  background: transparent;
+  color: var(--arb-fg-dark);
+  --arb-bg-light: var(--arb-bg-dark);
+  --arb-fg-light: var(--arb-fg-dark);
+  --arb-at-light: var(--arb-at-dark);
+  --arb-co-light: var(--arb-co-dark);
+  --arb-cb-light: var(--arb-cb-dark);
+  --arb-fb-light: var(--arb-fb-dark);
+  --arb-f-light: var(--arb-f-dark);
+  --arb-fm-light: var(--arb-fm-dark);
+  --arb-k-light: var(--arb-k-dark);
+  --arb-kc-light: var(--arb-kc-dark);
+  --arb-ko-light: var(--arb-ko-dark);
+  --arb-kd-light: var(--arb-kd-dark);
+  --arb-ke-light: var(--arb-ke-dark);
+  --arb-kf-light: var(--arb-kf-dark);
+  --arb-ki-light: var(--arb-ki-dark);
+  --arb-kp-light: var(--arb-kp-dark);
+  --arb-kr-light: var(--arb-kr-dark);
+  --arb-kt-light: var(--arb-kt-dark);
+  --arb-ky-light: var(--arb-ky-dark);
+  --arb-o-light: var(--arb-o-dark);
+  --arb-pr-light: var(--arb-pr-dark);
+  --arb-p-light: var(--arb-p-dark);
+  --arb-pb-light: var(--arb-pb-dark);
+  --arb-pd-light: var(--arb-pd-dark);
+  --arb-ps-light: var(--arb-ps-dark);
+  --arb-s-light: var(--arb-s-dark);
+  --arb-ss-light: var(--arb-ss-dark);
+  --arb-tg-light: var(--arb-tg-dark);
+  --arb-td-light: var(--arb-td-dark);
+  --arb-te-light: var(--arb-te-dark);
+  --arb-t-light: var(--arb-t-dark);
+  --arb-tb-light: var(--arb-tb-dark);
+  --arb-tq-light: var(--arb-tq-dark);
+  --arb-v-light: var(--arb-v-dark);
+  --arb-vb-light: var(--arb-vb-dark);
+  --arb-vp-light: var(--arb-vp-dark);
+  --arb-c-light: var(--arb-c-dark);
+  --arb-cd-light: var(--arb-cd-dark);
+  --arb-m-light: var(--arb-m-dark);
+  --arb-l-light: var(--arb-l-dark);
+  --arb-n-light: var(--arb-n-dark);
+  --arb-tl-light: var(--arb-tl-dark);
+  --arb-em-light-style: var(--arb-em-dark-style);
+  --arb-st-light-weight: var(--arb-st-dark-weight);
+  --arb-tu-light: var(--arb-tu-dark);
+  --arb-tu-light-decoration: var(--arb-tu-dark-decoration);
+  --arb-tr-light: var(--arb-tr-dark);
+  --arb-se-light: var(--arb-se-dark);
+  --arb-tt-light: var(--arb-tt-dark);
+  --arb-tt-light-weight: var(--arb-tt-dark-weight);
+  --arb-tx-light-decoration: var(--arb-tx-dark-decoration);
+  --arb-sp-light: var(--arb-sp-dark);
+  --arb-in-light: var(--arb-in-dark);
+  --arb-sc-light: var(--arb-sc-dark);
+  --arb-rp-light: var(--arb-rp-dark);
+  --arb-cn-light: var(--arb-cn-dark);
+  --arb-ex-light: var(--arb-ex-dark);
+  --arb-pp-light: var(--arb-pp-dark);
+  --arb-ch-light: var(--arb-ch-dark);
+  --arb-cs-light: var(--arb-cs-dark);
+  --arb-vm-light: var(--arb-vm-dark);
+  --arb-fd-light: var(--arb-fd-dark);
+  --arb-tf-light: var(--arb-tf-dark);
+  --arb-fc-light: var(--arb-fc-dark);
+  --arb-km-light: var(--arb-km-dark);
+  --arb-dr-light: var(--arb-dr-dark);
+  --arb-rx-light: var(--arb-rx-dark);
+}
+
+pre[data-arborium] code {
+  display: block;
+  font-family: var(--font-mono);
+  white-space: pre;
+}

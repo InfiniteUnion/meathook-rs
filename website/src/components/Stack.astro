@@ -1,0 +1,85 @@
+---
+const tiers = [
+  {
+    name: 'Collector',
+    detail: 'Produces a batch of row-shaped records per tick.',
+    code: 'SatayCollector::new(...)',
+    note: 'Adapts any satay-generated client.',
+  },
+  {
+    name: 'Buffered',
+    detail: 'In-memory window before the durable tier.',
+    code: 'flush: 5m | 10k records',
+    note: 'Tier 1 in the example stack.',
+  },
+  {
+    name: 'DiskSpool',
+    detail: 'Write-ahead JSON lines, fsynced before ingest returns.',
+    code: 'flush: 1h',
+    note: 'Segments replay on restart.',
+    highlight: true,
+  },
+  {
+    name: 'Terminal sink',
+    detail: 'Implement Sink for your storage. HfSink is the built-in parquet + HuggingFace path.',
+    code: 'impl Sink<R>',
+    note: 'Swap the terminal layer, keep the spool.',
+  },
+];
+---
+
+<section id="stack" class="border-b border-line bg-surface">
+  <div class="mx-auto max-w-6xl px-5 py-20 lg:px-8 lg:py-28">
+    <div class="grid gap-12 lg:grid-cols-[0.42fr_0.58fr] lg:gap-20">
+      <div>
+        <h2 class="reveal text-3xl font-semibold tracking-tight text-ink md:text-4xl">
+          Sinks compose like tower layers
+        </h2>
+        <p class="reveal mt-4 max-w-sm text-base leading-relaxed text-muted">
+          No YAML plugin system. Implement two traits, stack flush policies, and fan out with <code class="rounded bg-code px-1.5 py-0.5 font-mono text-xs text-ink">Tee</code>.
+        </p>
+      </div>
+
+      <ol class="relative space-y-0">
+        {tiers.map((tier, index) => (
+          <li class={`reveal relative flex gap-5 pb-10 last:pb-0`} style={`transition-delay: ${index * 80}ms`}>
+            {index < tiers.length - 1 && (
+              <span
+                class="absolute left-[15px] top-8 h-[calc(100%-1rem)] w-px bg-line"
+                aria-hidden="true"
+              />
+            )}
+            <span
+              class:list={[
+                'relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded border font-mono text-xs',
+                tier.highlight
+                  ? 'border-hook/40 bg-hook-soft text-hook'
+                  : 'border-line bg-canvas text-muted',
+              ]}
+            >
+              {index + 1}
+            </span>
+            <div class="min-w-0 pt-0.5">
+              <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h3 class="font-mono text-sm font-semibold text-ink">{tier.name}</h3>
+                <code class="font-mono text-xs text-muted">{tier.code}</code>
+              </div>
+              <p class="mt-1.5 text-sm leading-relaxed text-muted">{tier.detail}</p>
+              <p class="mt-1 font-mono text-xs text-faint">{tier.note}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+
+    <div class="reveal mt-16 overflow-x-auto rounded border border-line bg-canvas p-5 font-mono text-xs leading-relaxed text-muted md:text-sm">
+      <span class="text-hook">tick</span>(interval)
+      <span class="text-faint"> ──► </span>
+      Collector::collect()
+      <span class="text-faint"> ──► </span>
+      Vec&lt;Record&gt;
+      <span class="text-faint"> ──► </span>
+      Sink::ingest(...)
+    </div>
+  </div>
+</section>

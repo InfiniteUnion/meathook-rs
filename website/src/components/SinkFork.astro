@@ -1,0 +1,290 @@
+---
+const pipeline = [
+  { name: 'Buffered', sub: 'in-memory window' },
+  { name: 'DiskSpool', sub: 'fsynced spool' },
+  { name: 'Terminal sink', sub: 'your trait impl', highlight: true },
+];
+
+const destinations = [
+  {
+    name: 'Your Sink impl',
+    sub: 'impl Sink for R',
+    emphasis: true,
+  },
+  {
+    name: 'HfSink',
+    sub: 'built-in',
+    builtIn: true,
+  },
+  {
+    name: 'Postgres',
+    sub: 'example',
+    example: true,
+  },
+  {
+    name: 'S3',
+    sub: 'example',
+    example: true,
+  },
+];
+---
+
+<section id="sinks" class="border-b border-line bg-surface">
+  <div class="mx-auto max-w-6xl px-5 py-14 lg:px-8 lg:py-16">
+    <div class="reveal max-w-2xl">
+      <h2 class="text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+        Terminal sink is yours to implement
+      </h2>
+      <p class="mt-3 text-sm leading-relaxed text-muted md:text-base">
+        HfSink ships out of the box. Anything else is a <code class="rounded bg-code px-1.5 py-0.5 font-mono text-xs text-ink">Sink</code> impl behind the same durable stack.
+      </p>
+    </div>
+
+    <div class="reveal mt-10 overflow-x-auto">
+      <div class="fork-diagram min-w-[640px]">
+        <div class="fork-pipeline">
+          {pipeline.map((node, index) => (
+            <div class="fork-pipeline__item">
+              {index > 0 && (
+                <span class="fork-arrow" aria-hidden="true">
+                  <svg viewBox="0 0 24 12" class="h-3 w-6 text-faint" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M0 6h18M14 2l6 4-6 4" />
+                  </svg>
+                </span>
+              )}
+              <div
+                class:list={[
+                  'fork-node',
+                  node.highlight && 'fork-node--highlight',
+                ]}
+              >
+                <span class="fork-node__name">{node.name}</span>
+                <span class="fork-node__sub">{node.sub}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div class="fork-branch" aria-hidden="true">
+          <span class="fork-branch__stem"></span>
+          <span class="fork-branch__bar"></span>
+        </div>
+
+        <div class="fork-destinations">
+          {destinations.map((dest) => (
+            <div
+              class:list={[
+                'fork-dest',
+                dest.emphasis && 'fork-dest--emphasis',
+                dest.builtIn && 'fork-dest--builtin',
+                dest.example && 'fork-dest--example',
+              ]}
+            >
+              <span class="fork-dest__connector" aria-hidden="true"></span>
+              <div class="fork-dest__body">
+                <span class="fork-dest__name">{dest.name}</span>
+                <span class="fork-dest__sub">{dest.sub}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .fork-diagram {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .fork-pipeline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+  }
+
+  .fork-pipeline__item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .fork-arrow {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .fork-node {
+    border: 1px solid var(--color-line);
+    background: var(--color-canvas);
+    border-radius: 4px;
+    padding: 0.625rem 1rem;
+    text-align: center;
+    min-width: 7rem;
+  }
+
+  .fork-node--highlight {
+    border-color: color-mix(in srgb, var(--color-hook) 40%, var(--color-line));
+    background: var(--color-hook-soft);
+  }
+
+  .fork-node__name {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .fork-node--highlight .fork-node__name {
+    color: var(--color-hook);
+  }
+
+  .fork-node__sub {
+    display: block;
+    margin-top: 0.125rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--color-faint);
+  }
+
+  .fork-branch {
+    position: relative;
+    height: 2rem;
+    margin: 0 auto;
+    width: min(100%, 28rem);
+  }
+
+  .fork-branch__stem {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 1px;
+    height: 100%;
+    background: var(--color-line);
+    transform: translateX(-50%);
+  }
+
+  .fork-branch__bar {
+    position: absolute;
+    left: 12.5%;
+    right: 12.5%;
+    bottom: 0;
+    height: 1px;
+    background: var(--color-line);
+  }
+
+  .fork-destinations {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+  }
+
+  .fork-dest {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .fork-dest__connector {
+    width: 1px;
+    height: 1.25rem;
+    background: var(--color-line);
+    flex-shrink: 0;
+  }
+
+  .fork-dest__body {
+    width: 100%;
+    border: 1px solid var(--color-line);
+    background: var(--color-canvas);
+    border-radius: 4px;
+    padding: 0.625rem 0.75rem;
+    text-align: center;
+  }
+
+  .fork-dest--emphasis .fork-dest__body {
+    border-color: color-mix(in srgb, var(--color-hook) 50%, var(--color-line));
+    background: var(--color-hook-soft);
+  }
+
+  .fork-dest--builtin .fork-dest__body {
+    border-color: color-mix(in srgb, var(--color-hook) 25%, var(--color-line));
+  }
+
+  .fork-dest--example .fork-dest__body {
+    border-style: dashed;
+    border-color: var(--color-line-strong);
+    opacity: 0.75;
+  }
+
+  .fork-dest__name {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .fork-dest--emphasis .fork-dest__name {
+    color: var(--color-hook);
+  }
+
+  .fork-dest--builtin .fork-dest__name {
+    color: var(--color-hook-muted);
+  }
+
+  .fork-dest__sub {
+    display: block;
+    margin-top: 0.125rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--color-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  @media (max-width: 767px) {
+    .fork-diagram {
+      min-width: 0;
+    }
+
+    .fork-pipeline {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .fork-pipeline__item {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .fork-arrow {
+      justify-content: center;
+      transform: rotate(90deg);
+    }
+
+    .fork-node {
+      min-width: 0;
+    }
+
+    .fork-branch {
+      display: none;
+    }
+
+    .fork-destinations {
+      grid-template-columns: 1fr 1fr;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--color-line);
+    }
+
+    .fork-dest__connector {
+      display: none;
+    }
+  }
+</style>

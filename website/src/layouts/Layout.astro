@@ -1,0 +1,52 @@
+---
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'meathook — durable Rust data pipelines',
+  description = 'Poll APIs on an interval, buffer samples into time windows, and ship them to long-term storage. Library-first, write-ahead durable.',
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0c0a09" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content="/logo.png" />
+    <title>{title}</title>
+  </head>
+  <body class="min-h-[100dvh] antialiased">
+    <slot />
+    <script>
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!reduce) {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+              }
+            }
+          },
+          { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+        );
+        document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
+      } else {
+        document.querySelectorAll('.reveal').forEach((el) => el.classList.add('is-visible'));
+      }
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  @import "../styles/global.css";
+</style>
