@@ -1,0 +1,328 @@
+---
+const initialArchive = [
+  '2024-06-18/13.parquet',
+  '2024-06-18/14.parquet',
+  '2024-06-19/14.parquet',
+  '2024-06-20/14.parquet',
+  '2024-07-18/14.parquet',
+  '2024-08-18/14.parquet',
+];
+
+const cycleReadings = [
+  { k: 'air_temperature', v: '29.6', unit: '°C', st: 'S24', ts: '14:03:00Z' },
+  { k: 'rainfall', v: '0.4', unit: 'mm', st: 'S43', ts: '14:03:00Z' },
+  { k: 'pm25', v: '14', unit: '', rg: 'central', ts: '14:05:00Z' },
+  { k: 'air_temperature', v: '29.7', unit: '°C', st: 'S24', ts: '14:04:00Z' },
+];
+
+const cycleArchive = [
+  '2024-09-18/14.parquet',
+  '2024-10-18/14.parquet',
+  '2024-11-18/14.parquet',
+  '2025-01-18/14.parquet',
+];
+---
+
+<section class="border-t hairline" data-ephemeral>
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <p class="eyebrow mb-5">ephemeral &rarr; durable</p>
+    <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+      APIs forget. meathook doesn't.
+    </h2>
+    <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
+      A weather reading at 14:02 is gone from the source by 14:03. The API only
+      ever serves <em class="text-ink not-italic">latest</em>. If you don't poll
+      and store it continuously, that reading is lost forever.
+    </p>
+
+    {/* the visual: ephemeral (left) → meathook (bridge) → archive (right) */}
+    <div class="mt-12 grid items-start gap-6 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
+
+      {/* ephemeral reading — fades in and out */}
+      <div class="ephemeral-panel min-w-0 overflow-hidden">
+        <p class="ephemeral-label">now</p>
+        <div class="ephemeral-reading" data-ephemeral-reading>
+          <span class="ephemeral-dim">{"{"}</span>
+          "k":"<span class="ephemeral-key" data-ek>air_temperature</span>"<span class="ephemeral-dim">,</span>
+          "v":<span class="ephemeral-val" data-ev>29.4</span><span class="ephemeral-dim">,</span>
+          "st":"<span class="ephemeral-st" data-est>S24</span>"<span class="ephemeral-dim">,</span>
+          "ts":"<span class="ephemeral-ts" data-ets>14:02:00Z</span>"
+          <span class="ephemeral-dim">{"}"}</span>
+        </div>
+        <p class="ephemeral-gone">gone in 60s</p>
+      </div>
+
+      {/* bridge — meathook arrow */}
+      <div class="bridge min-w-0">
+        <span class="bridge-arrow" aria-hidden="true">&rarr;</span>
+        <span class="bridge-label">meathook</span>
+        <span class="bridge-arrow" aria-hidden="true">&rarr;</span>
+      </div>
+
+      {/* archive — accumulates permanently */}
+      <div class="archive-panel min-w-0 overflow-hidden">
+        <div class="archive-header">
+          <span class="archive-path">data/air_temperature/</span>
+          <span class="archive-count" data-archive-count>{initialArchive.length} files</span>
+        </div>
+        <ul class="archive-list" data-archive-list>
+          {initialArchive.map((f) => (
+            <li class="archive-file">{f}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+
+    {/* punchline */}
+    <div class="mt-14 max-w-[44rem]">
+      <p class="font-display text-2xl leading-snug tracking-[-0.01em] text-ink md:text-3xl">
+        A single reading is worthless.<br />
+        A year of hourly readings <span class="italic text-accent">is a dataset.</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .ephemeral-panel {
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-surface) 50%, transparent);
+    padding: 1.25rem;
+    text-align: center;
+  }
+  .ephemeral-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+    margin-bottom: 0.75rem;
+  }
+  .ephemeral-reading {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--color-ink-dim);
+    white-space: nowrap;
+    overflow-x: auto;
+    transition: opacity 400ms ease-out;
+  }
+  .ephemeral-reading.is-fading {
+    opacity: 0;
+  }
+  .ephemeral-dim { color: var(--color-ink-faint); }
+  .ephemeral-key { color: var(--color-ink); }
+  .ephemeral-val { color: var(--color-warn); }
+  .ephemeral-st { color: var(--color-ink-dim); }
+  .ephemeral-ts { color: var(--color-ink-faint); }
+  .ephemeral-gone {
+    margin-top: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-warn);
+    opacity: 0.7;
+  }
+
+  .bridge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1.5rem 0;
+    font-family: var(--font-mono);
+  }
+  .bridge-arrow {
+    font-size: 1.25rem;
+    color: var(--color-accent);
+  }
+  .bridge-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+  /* on mobile, bridge becomes vertical */
+  @media (max-width: 1023px) {
+    .bridge {
+      flex-direction: column;
+      padding: 0.5rem 0;
+    }
+    .bridge-arrow {
+      transform: rotate(90deg);
+      font-size: 1rem;
+    }
+  }
+
+  .archive-panel {
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    background: var(--color-surface);
+    padding: 1.25rem;
+  }
+  .archive-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--color-hairline);
+    padding-bottom: 0.6rem;
+  }
+  .archive-path {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-ink-faint);
+  }
+  .archive-count {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--color-accent);
+  }
+  .archive-list {
+    max-height: 12rem;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.8;
+    color: var(--color-ink-dim);
+  }
+  .archive-file {
+    opacity: 1;
+    transition: opacity 300ms ease-out;
+  }
+  .archive-file.is-new {
+    opacity: 0;
+    animation: archive-land 400ms ease-out forwards;
+  }
+  @keyframes archive-land {
+    0% { opacity: 0; transform: translateY(-6px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  .archive-file::before {
+    content: '▪';
+    color: var(--color-accent);
+    margin-right: 0.5rem;
+    font-size: 0.5rem;
+    vertical-align: middle;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ephemeral-reading { transition: none; opacity: 1 !important; }
+    .archive-file { animation: none !important; opacity: 1 !important; }
+  }
+
+  @media (max-width: 640px) {
+    .ephemeral-reading { font-size: 0.6875rem; }
+    .archive-list { font-size: 0.6875rem; }
+  }
+</style>
+
+<script>
+  const section = document.querySelector('[data-ephemeral]') as HTMLElement | null;
+  const readingEl = section?.querySelector('[data-ephemeral-reading]') as HTMLElement | null;
+  const archiveList = section?.querySelector('[data-archive-list]') as HTMLElement | null;
+  const countEl = section?.querySelector('[data-archive-count]') as HTMLElement | null;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Define as global for TypeScript
+  declare global {
+    interface Window { cycleReadings?: any[]; cycleArchive?: string[]; }
+  }
+
+  if (section) {
+    (window as any).cycleReadings = [
+      { k: 'air_temperature', v: '29.6', st: 'S24', ts: '14:03:00Z' },
+      { k: 'rainfall', v: '0.4', st: 'S43', ts: '14:03:00Z' },
+      { k: 'pm25', v: '14', rg: 'central', ts: '14:05:00Z' },
+      { k: 'air_temperature', v: '29.7', st: 'S24', ts: '14:04:00Z' },
+    ];
+    (window as any).cycleArchive = [
+      '2024-09-18/14.parquet',
+      '2024-10-18/14.parquet',
+      '2024-11-18/14.parquet',
+      '2025-01-18/14.parquet',
+    ];
+  }
+
+  if (section && !reduce && readingEl && archiveList && countEl) {
+    let cycleIdx = 0;
+    let fileCount = archiveList.children.length;
+    let intervalId: number | undefined;
+    let running = false;
+
+    const ek = readingEl.querySelector('[data-ek]') as HTMLElement;
+    const ev = readingEl.querySelector('[data-ev]') as HTMLElement;
+    const est = readingEl.querySelector('[data-est]') as HTMLElement;
+    const ets = readingEl.querySelector('[data-ets]') as HTMLElement;
+
+    const updateReading = (r: any) => {
+      ek.textContent = r.k;
+      ev.textContent = r.v;
+      if (r.st) {
+        est.textContent = r.st;
+        est.style.display = 'inline';
+      } else if (r.rg) {
+        est.textContent = r.rg;
+        est.style.display = 'inline';
+      }
+      ets.textContent = r.ts;
+    };
+
+    const addArchiveFile = (path: string) => {
+      const li = document.createElement('li');
+      li.className = 'archive-file is-new';
+      li.textContent = path;
+      archiveList.appendChild(li);
+      fileCount++;
+      countEl.textContent = `${fileCount} files`;
+      // auto-scroll to bottom
+      archiveList.scrollTop = archiveList.scrollHeight;
+      // keep the list bounded
+      if (archiveList.children.length > 14) {
+        archiveList.removeChild(archiveList.firstElementChild as Element);
+      }
+    };
+
+    const tick = () => {
+      const readings = (window as any).cycleReadings as any[];
+      const archives = (window as any).cycleArchive as string[];
+
+      // 1. fade out the current reading
+      readingEl.classList.add('is-fading');
+
+      // 2. after fade out, swap reading and fade back in
+      window.setTimeout(() => {
+        const r = readings[cycleIdx % readings.length];
+        updateReading(r);
+        readingEl.classList.remove('is-fading');
+
+        // 3. simultaneously, land a new parquet file in the archive
+        const arch = archives[cycleIdx % archives.length];
+        addArchiveFile(arch);
+
+        cycleIdx++;
+      }, 400);
+    };
+
+    const start = () => {
+      if (running) return;
+      running = true;
+      // first tick after a beat
+      intervalId = window.setInterval(tick, 3500);
+    };
+    const stop = () => {
+      running = false;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => (e.isIntersecting ? start() : stop()));
+      },
+      { threshold: 0.3 },
+    );
+    io.observe(section);
+  }
+</script>

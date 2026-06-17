@@ -1,0 +1,391 @@
+---
+const minutes = 60;
+const lanes = [
+  {
+    name: 'air_temperature',
+    interval: '1m',
+    tickAt: (_i: number) => true,
+    size: 'sm' as const,
+  },
+  {
+    name: 'rainfall',
+    interval: '5m',
+    tickAt: (i: number) => i % 5 === 0,
+    size: 'md' as const,
+  },
+  {
+    name: 'pm25',
+    interval: '1h',
+    tickAt: (i: number) => i === minutes - 1,
+    size: 'lg' as const,
+  },
+];
+const axisMarks = [0, 15, 30, 45, 60];
+---
+
+<section class="border-t hairline bg-surface/30">
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <p class="eyebrow mb-5">flow &middot; tick cadence</p>
+    <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+      Each pipeline keeps its own rhythm.
+    </h2>
+    <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
+      Collectors tick at their own intervals &mdash; every minute, every five,
+      every hour. The sink stack buffers them all and ships a parquet file when
+      the flush window closes.
+    </p>
+
+    <div class="flow-chart mt-12 overflow-x-auto" data-flow>
+      <div class="flow-inner min-w-[42rem]">
+        {/* lanes + scan line overlay */}
+        <div class="lanes-wrapper relative" data-lanes-wrapper>
+          {/* scan line — sweeps across the track area */}
+          <div class="track-overlay" data-track-overlay>
+            <div class="scan-line" data-scan-line></div>
+          </div>
+
+          {lanes.map((lane, laneIdx) => (
+            <div class="lane" style={`--lane-idx:${laneIdx}`}>
+              <div class="lane-label">
+                <span class="lane-name">{lane.name}</span>
+                <span class="lane-interval">{lane.interval}</span>
+              </div>
+              <div class="lane-track-wrapper">
+                <div
+                  class="lane-track"
+                  style="grid-template-columns: repeat(60, 1fr);"
+                >
+                  {Array.from({ length: minutes }, (_, i) => (
+                    <div class="tick-cell">
+                      {lane.tickAt(i) && (
+                        <span class={`tick tick-${lane.size}`}></span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* time axis */}
+        <div class="time-axis">
+          <div class="lane-label-spacer"></div>
+          <div class="axis-track">
+            {axisMarks.map((m) => (
+              <span class="axis-mark" style={`left: ${(m / minutes) * 100}%;`}>
+                {m}m
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* flush window bar */}
+        <div class="flush-row">
+          <div class="lane-label-spacer">
+            <span class="flush-eyebrow">flush</span>
+          </div>
+          <div class="flush-track-wrapper">
+            <div class="flush-bar" data-flush-bar>
+              <div class="flush-fill" data-flush-fill></div>
+            </div>
+            <span class="flush-meta">window &middot; 1h</span>
+          </div>
+        </div>
+
+        {/* output — appears when the flush fires */}
+        <div class="flush-output" data-flush-output>
+          <span class="flush-output-arrow" aria-hidden="true">&darr;</span>
+          <code class="flush-output-path">
+            data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}.parquet
+          </code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .lanes-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .lane {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .lane-label {
+    flex: 0 0 8.5rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .lane-name {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-ink);
+  }
+  .lane-interval {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-accent);
+  }
+
+  .lane-track-wrapper {
+    flex: 1 1 auto;
+    position: relative;
+  }
+  .lane-track {
+    display: grid;
+    align-items: center;
+    height: 1.5rem;
+  }
+
+  .tick-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tick {
+    display: block;
+    border-radius: 50%;
+    background: var(--color-accent);
+    opacity: 0;
+    transition: opacity 400ms ease-out;
+    transition-delay: calc(var(--lane-idx, 0) * 120ms);
+  }
+  .flow-chart.is-revealed .tick {
+    opacity: 0.85;
+  }
+  .tick-sm { width: 3px; height: 3px; }
+  .tick-md { width: 5px; height: 5px; }
+  .tick-lg {
+    width: 8px;
+    height: 8px;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
+
+  /* scan line overlay — positioned over the track area only */
+  .track-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 9.5rem; /* lane-label width + gap */
+    right: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .scan-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    background: var(--color-accent);
+    opacity: 0;
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+
+  /* time axis */
+  .time-axis {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+  .lane-label-spacer {
+    flex: 0 0 8.5rem;
+  }
+  .axis-track {
+    flex: 1 1 auto;
+    position: relative;
+    height: 1rem;
+  }
+  .axis-mark {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--color-ink-faint);
+  }
+  .axis-mark:first-child {
+    transform: translateX(0);
+  }
+  .axis-mark:last-child {
+    transform: translateX(-100%);
+  }
+
+  /* flush bar */
+  .flush-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.25rem;
+  }
+  .flush-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+  .flush-track-wrapper {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .flush-bar {
+    flex: 1 1 auto;
+    height: 3px;
+    background: var(--color-hairline);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .flush-fill {
+    height: 100%;
+    width: 0;
+    background: var(--color-accent);
+    opacity: 0.5;
+    transition: opacity 200ms;
+  }
+  .flush-fill.is-flushed {
+    opacity: 1;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  }
+  .flush-meta {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--color-ink-faint);
+    white-space: nowrap;
+  }
+
+  /* output chip */
+  .flush-output {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-left: 9.5rem;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 300ms ease-out, transform 300ms ease-out;
+  }
+  .flush-output.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .flush-output-arrow {
+    color: var(--color-accent);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }
+  .flush-output-path {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-ink-dim);
+    background: var(--color-ground);
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    padding: 0.2rem 0.6rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tick { opacity: 0.85 !important; transition: none !important; }
+    .scan-line { display: none; }
+    .flush-fill { width: 100% !important; opacity: 0.5; }
+    .flush-output { opacity: 1 !important; transform: none !important; }
+  }
+
+  @media (max-width: 640px) {
+    .flush-output { padding-left: 0; }
+  }
+</style>
+
+<script>
+  const flow = document.querySelector('[data-flow]') as HTMLElement | null;
+  const scanLine = flow?.querySelector('[data-scan-line]') as HTMLElement | null;
+  const flushFill = flow?.querySelector('[data-flush-fill]') as HTMLElement | null;
+  const flushOutput = flow?.querySelector('[data-flush-output]') as HTMLElement | null;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (flow) {
+    // 1. staggered tick reveal
+    if (!reduce) {
+      window.setTimeout(() => flow.classList.add('is-revealed'), 200);
+    } else {
+      flow.classList.add('is-revealed');
+    }
+
+    // 2. scan line sweep + flush pulse loop
+    if (!reduce && scanLine && flushFill) {
+      let progress = 0;
+      let lastTime = 0;
+      let running = false;
+      let rafId = 0;
+      const duration = 8000;
+
+      const frame = (time: number) => {
+        if (!running) return;
+        if (!lastTime) lastTime = time;
+        const delta = time - lastTime;
+        lastTime = time;
+        progress += delta / duration;
+
+        if (progress >= 1) {
+          // flush event
+          scanLine.style.left = '100%';
+          flushFill.style.width = '100%';
+          flushFill.classList.add('is-flushed');
+          flushOutput?.classList.add('is-visible');
+
+          // hold the flush, then reset
+          window.setTimeout(() => {
+            flushFill.classList.remove('is-flushed');
+            flushOutput?.classList.remove('is-visible');
+            progress = 0;
+            lastTime = 0;
+            scanLine.style.left = '0%';
+            flushFill.style.width = '0%';
+            if (running) {
+              rafId = requestAnimationFrame(frame);
+            }
+          }, 1200);
+          return;
+        }
+
+        scanLine.style.left = `${progress * 100}%`;
+        flushFill.style.width = `${progress * 100}%`;
+        rafId = requestAnimationFrame(frame);
+      };
+
+      const start = () => {
+        if (running) return;
+        running = true;
+        lastTime = 0;
+        rafId = requestAnimationFrame(frame);
+      };
+      const stop = () => {
+        running = false;
+        if (rafId) cancelAnimationFrame(rafId);
+      };
+
+      const io = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => (e.isIntersecting ? start() : stop()));
+        },
+        { threshold: 0.2 },
+      );
+      io.observe(flow);
+
+      // small initial delay so the tick reveal lands first
+      window.setTimeout(start, 800);
+    }
+  }
+</script>

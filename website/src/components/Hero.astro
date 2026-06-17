@@ -1,0 +1,422 @@
+---
+const records = [
+  { k: 'air_temperature', v: '29.4', st: 'S24', ts: '14:02:00Z' },
+  { k: 'rainfall', v: '0.2', st: 'S24', ts: '14:02:00Z' },
+  { k: 'pm25', v: '12', rg: 'west', ts: '14:00:00Z' },
+  { k: 'air_temperature', v: '29.5', st: 'S24', ts: '14:03:00Z' },
+  { k: 'rainfall', v: '0.0', st: 'S43', ts: '14:03:00Z' },
+];
+
+const terminals = [
+  { name: 'HfSink', note: 'parquet encode + commit', dest: '→ huggingface' },
+  { name: 'SqliteSink', note: 'write to local db', dest: '→ sqlite' },
+  { name: 'YourSink', note: 'impl Sink<R>', dest: '→ anywhere' },
+];
+---
+
+<section
+  id="hero"
+  class="relative mx-auto max-w-[84rem] px-6 pt-16 pb-24 md:pt-24 md:pb-32"
+  data-hero
+>
+  <div class="grid gap-14 lg:grid-cols-[1fr_1.15fr] lg:items-center lg:gap-12">
+    {/* thesis column */}
+    <div class="max-w-[34rem]">
+      <p class="eyebrow mb-6 flex items-center gap-1.5">
+        <img src="/developer-icons/rust-light.svg" alt="" class="h-3.5 w-3.5" width="14" height="14" loading="lazy" decoding="async" />
+        meathook-rs &middot; rust 2024
+      </p>
+      <h1 class="font-display text-[2.75rem] leading-[1.05] tracking-[-0.02em] text-ink sm:text-6xl md:text-[4.25rem]">
+        Poll an API.<br />
+        Compose the sink.<br />
+        Ship it <span class="italic text-accent">— durably.</span>
+      </h1>
+      <p class="mt-7 max-w-[30rem] text-lg leading-relaxed text-ink-dim">
+        A library-first base for long-running data collection jobs. Sinks
+        compose like tower layers. There is no YAML plugin system.
+      </p>
+
+      <div class="mt-9 flex flex-wrap items-center gap-3">
+        <a
+          href="https://docs.rs/meathook-rs"
+          class="inline-flex items-center gap-2 rounded-sm border border-accent/70 bg-accent/10 px-5 py-3 font-mono text-sm text-accent transition-colors hover:bg-accent/20"
+          rel="noopener"
+        >
+          Read the docs
+          <span aria-hidden="true">&rarr;</span>
+        </a>
+        <button
+          type="button"
+          data-copy="cargo add meathook-rs"
+          class="group inline-flex items-center gap-2 rounded-sm border hairline bg-surface px-5 py-3 font-mono text-sm text-ink-dim transition-colors hover:text-ink"
+        >
+          <span class="text-accent">$</span>
+          cargo add meathook-rs
+          <span class="copy-icon-slot" aria-hidden="true">
+            <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><rect x="8" y="8" width="10" height="10"></rect><path d="M6 16H4V4h12v2"></path></svg>
+            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter"><path d="M5 12.5 10 17 19 7"></path></svg>
+          </span>
+        </button>
+      </div>
+
+      <p class="mt-8 font-mono text-xs text-ink-faint">
+        built on the <a href="https://github.com/zeon256/satay-rs" class="text-ink-dim underline-offset-4 hover:text-accent hover:underline" rel="noopener">satay-rs</a> sans-IO action model
+      </p>
+    </div>
+
+    {/* the nested-stack signature — desktop only, hidden on mobile */}
+    <div class="relative hidden lg:block">
+      <div
+        class="stack-frame stack-buffered"
+        data-tier="buffered"
+        aria-label="nested sink stack: Buffered wrapping DiskSpool wrapping a terminal sink"
+      >
+        <div class="stack-label">
+          <span class="stack-name">Buffered</span>
+          <span class="stack-meta">flush: 5m &middot; 10k records</span>
+          <span class="stack-tier">tier 1 &mdash; memory</span>
+        </div>
+
+        <div class="stack-frame stack-diskspool" data-tier="diskspool">
+          <div class="stack-label">
+            <span class="stack-name">DiskSpool</span>
+            <span class="stack-meta">flush: 1h</span>
+            <span class="stack-tier">tier 2 &mdash; fsynced</span>
+          </div>
+
+          <div class="spool-surface spool-lines" data-spool>
+            <ul class="record-list" data-records>
+              {records.map((r, i) => (
+                <li class="record" style={`--i:${i}`} data-record>
+                  <span class="record-dim">{"{"}</span>
+                  "k":"<span class="record-key">{r.k}</span>"<span class="record-dim">,</span>
+                  "v":<span class="record-val">{r.v}</span><span class="record-dim">,</span>
+                  {r.st ? (<>"st":"<span class="record-st">{r.st}</span>"<span class="record-dim">,</span></>) : null}
+                  {r.rg ? (<>"rg":"<span class="record-st">{r.rg}</span>"<span class="record-dim">,</span></>) : null}
+                  "ts":"<span class="record-ts">{r.ts}</span>"
+                  <span class="record-dim">{"}"}</span>
+                </li>
+              ))}
+            </ul>
+            <div class="fsync-flash" data-fsync aria-hidden="true">fsync</div>
+          </div>
+
+          <div class="stack-frame stack-terminal" data-tier="terminal">
+            <div class="stack-label">
+              <span class="stack-name">terminal</span>
+              <span class="stack-tier">swappable</span>
+            </div>
+            <ul class="terminal-list" data-terminals>
+              {terminals.map((t, i) => (
+                <li class="terminal-row" data-terminal-row style={`--i:${i}`} data-name={t.name}>
+                  <span class="terminal-mark" aria-hidden="true">&rarr;</span>
+                  <span class="terminal-name">{t.name}</span>
+                  <span class="terminal-note">{t.note}</span>
+                  <span class="terminal-dest">{t.dest}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <p class="mt-4 px-1 font-mono text-xs break-words text-ink-faint">
+        data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}.parquet &nbsp;&rarr;&nbsp; <span class="text-ink-dim">huggingface</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .stack-frame {
+    position: relative;
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    background: var(--color-surface);
+    padding: 1.5rem;
+  }
+  .stack-buffered {
+    background: var(--color-surface);
+    padding: 1.75rem 1.5rem 1.5rem;
+  }
+  .stack-diskspool {
+    margin-top: 1.25rem;
+    background: var(--color-surface-2);
+  }
+  .stack-terminal {
+    margin-top: 1.25rem;
+    background: color-mix(in srgb, var(--color-surface-2) 70%, var(--color-ground));
+    border-style: dashed;
+  }
+
+  .stack-label {
+    position: absolute;
+    top: -0.6rem;
+    left: 1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    background: var(--color-ground);
+    padding: 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.25rem;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .stack-buffered > .stack-label { left: 1.25rem; }
+  .stack-name { color: var(--color-ink); font-weight: 600; }
+  .stack-meta { color: var(--color-ink-faint); }
+  .stack-tier { color: var(--color-ink-faint); }
+  .stack-terminal > .stack-label .stack-tier { color: var(--color-accent); }
+
+  .spool-surface {
+    position: relative;
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    background: var(--color-ground);
+    min-height: 12.5rem;
+    padding: 0.75rem 1rem;
+    overflow: hidden;
+  }
+
+  .record-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--color-ink-dim);
+    white-space: nowrap;
+    overflow-x: auto;
+  }
+  .record {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  .record-dim { color: var(--color-ink-faint); }
+  .record-key { color: var(--color-ink); }
+  .record-val { color: var(--color-accent); }
+  .record-st { color: var(--color-ink-dim); }
+  .record-ts { color: var(--color-ink-faint); }
+
+  .fsync-flash {
+    position: absolute;
+    right: 0.6rem;
+    bottom: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent);
+    padding: 0.1rem 0.5rem;
+    border-radius: 2px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .fsync-flash.is-flash {
+    animation: fsync 120ms ease-out;
+  }
+  @keyframes fsync {
+    0% { opacity: 0; transform: translateY(2px); }
+    50% { opacity: 1; transform: translateY(0); box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 60%, transparent); }
+    100% { opacity: 0; transform: translateY(0); }
+  }
+
+  .terminal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  .terminal-row {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 2px;
+    color: var(--color-ink-faint);
+    transition: color 200ms, background 200ms;
+  }
+  .terminal-row.is-active {
+    color: var(--color-ink);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  }
+  .terminal-row.is-active .terminal-mark,
+  .terminal-row.is-active .terminal-name { color: var(--color-accent); }
+  .terminal-mark { color: var(--color-ink-faint); }
+  .terminal-name { color: var(--color-ink-dim); font-weight: 600; }
+  .terminal-note { color: var(--color-ink-faint); }
+  .terminal-dest { color: var(--color-ink-faint); font-size: 0.6875rem; }
+
+  /* load-in animation: records drop through tiers */
+  .record.is-in {
+    animation: record-drop 280ms ease-out forwards;
+    animation-delay: calc(var(--i) * 90ms + 200ms);
+  }
+  @keyframes record-drop {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .record { opacity: 1; transform: none; animation: none !important; }
+    .fsync-flash { display: none; }
+    .terminal-row { transition: none; }
+  }
+
+  @media (max-width: 640px) {
+    .stack-label { font-size: 0.625rem; gap: 0.5rem; }
+    .stack-meta { display: none; }
+    .record-list { font-size: 0.6875rem; }
+    .terminal-row { grid-template-columns: auto auto 1fr; font-size: 0.75rem; }
+    .terminal-dest { display: none; }
+  }
+
+  /* copy/check icon swap — always visible, cross-fades on click */
+  .copy-icon-slot {
+    display: inline-grid;
+    width: 0.875rem;
+    height: 0.875rem;
+    color: var(--color-ink-faint);
+    transition: color 200ms;
+  }
+  .copy-icon-slot svg {
+    grid-area: 1 / 1;
+    width: 100%;
+    height: 100%;
+    transition: opacity 150ms ease, transform 150ms ease;
+  }
+  .copy-icon { opacity: 1; transform: scale(1); }
+  .check-icon { opacity: 0; transform: scale(0.75); }
+  button[data-copy][data-copied="true"] .copy-icon { opacity: 0; transform: scale(0.75); }
+  button[data-copy][data-copied="true"] .check-icon { opacity: 1; transform: scale(1); color: var(--color-accent); }
+  button[data-copy]:hover .copy-icon-slot { color: var(--color-accent); }
+</style>
+
+<script>
+  const hero = document.querySelector('[data-hero]');
+  const recordsEl = hero?.querySelector('[data-records]');
+  const fsyncEl = hero?.querySelector('[data-fsync]');
+  const terminalRows = hero?.querySelectorAll('[data-terminal-row]');
+  const spoolEl = hero?.querySelector('[data-spool]');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (hero) {
+    // 1. load-in: stagger records, then fsync flash, then cycle terminal
+    if (!reduce && recordsEl) {
+      const records = recordsEl.querySelectorAll('[data-record]');
+      records.forEach((r) => r.classList.add('is-in'));
+
+      // fsync flash after records have settled
+      const lastDelay = records.length * 90 + 200 + 200;
+      window.setTimeout(() => {
+        fsyncEl?.classList.add('is-flash');
+        window.setTimeout(() => fsyncEl?.classList.remove('is-flash'), 200);
+      }, lastDelay);
+    }
+
+    // 2. terminal swap cycle — show all three, cycle the active highlight
+    if (!reduce && terminalRows && terminalRows.length) {
+      let active = 0;
+      const setActive = (i: number) => {
+        terminalRows.forEach((r, idx) => r.classList.toggle('is-active', idx === i));
+      };
+      setActive(0);
+      // begin cycling after the load-in settles
+      window.setTimeout(() => {
+        setActive(0);
+        const swapInterval = window.setInterval(() => {
+          active = (active + 1) % terminalRows.length;
+          setActive(active);
+        }, 2200);
+
+        // pause when hero is offscreen
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach((e) => {
+            if (!e.isIntersecting) {
+              clearInterval(swapInterval);
+            }
+          });
+        });
+        io.observe(hero);
+      }, 1800);
+    }
+
+    // 3. ambient tick — append a faint new JSONL line to the spool every ~4s
+    if (!reduce && spoolEl && recordsEl) {
+      const ticks = [
+        { k: 'air_temperature', v: '29.6', st: 'S24', ts: '14:04:00Z' },
+        { k: 'rainfall', v: '0.4', st: 'S43', ts: '14:04:00Z' },
+        { k: 'pm25', v: '14', rg: 'central', ts: '14:05:00Z' },
+        { k: 'air_temperature', v: '29.7', st: 'S24', ts: '14:05:00Z' },
+      ];
+      let tickIdx = 0;
+      let tickInterval: number | undefined;
+
+      const appendTick = () => {
+        const t = ticks[tickIdx % ticks.length];
+        tickIdx++;
+        const li = document.createElement('li');
+        li.className = 'record is-ambient';
+        li.style.color = 'var(--color-ink-faint)';
+        const inner =
+          `<span class="record-dim">{</span>` +
+          `"k":"<span class="record-key">${t.k}</span>"<span class="record-dim">,</span>` +
+          `"v":<span class="record-val">${t.v}</span><span class="record-dim">,</span>` +
+          (t.st ? `"st":"<span class="record-st">${t.st}</span>"<span class="record-dim">,</span>` : '') +
+          (t.rg ? `"rg":"<span class="record-st">${t.rg}</span>"<span class="record-dim">,</span>` : '') +
+          `"ts":"<span class="record-ts">${t.ts}</span>"<span class="record-dim">}</span>`;
+        li.innerHTML = inner;
+        li.style.opacity = '0';
+        recordsEl.appendChild(li);
+        // fade in
+        requestAnimationFrame(() => {
+          li.style.transition = 'opacity 600ms ease-out';
+          li.style.opacity = '1';
+        });
+        // keep the list bounded
+        if (recordsEl.children.length > 11) {
+          recordsEl.removeChild(recordsEl.firstElementChild as Element);
+        }
+      };
+
+      const startTick = () => {
+        tickInterval = window.setInterval(appendTick, 4000);
+      };
+      const stopTick = () => {
+        if (tickInterval) window.clearInterval(tickInterval);
+      };
+
+      // only tick while hero is on screen
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) startTick();
+          else stopTick();
+        });
+      });
+      io.observe(hero);
+      // start a bit after load-in
+      window.setTimeout(startTick, 2600);
+    }
+
+    // 4. copy-to-clipboard for the cargo add pill
+    const copyBtn = hero?.querySelector('[data-copy]') as HTMLButtonElement | null;
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        const text = copyBtn.dataset.copy || '';
+        try {
+          await navigator.clipboard.writeText(text);
+          copyBtn.setAttribute('data-copied', 'true');
+          window.setTimeout(() => copyBtn.removeAttribute('data-copied'), 1400);
+        } catch {
+          // noop — clipboard may be unavailable
+        }
+      });
+    }
+  }
+</script>

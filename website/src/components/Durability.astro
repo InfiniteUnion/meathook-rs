@@ -1,0 +1,79 @@
+---
+const rows = [
+  {
+    failure: 'SIGKILL / OOM-kill',
+    happens: 'leftover segments replayed on next start',
+    lost: '≤ 1 torn record',
+    severity: 'warn' as const,
+  },
+  {
+    failure: 'Task panic',
+    happens: 'supervisor respawns the pipeline from its factory',
+    lost: 'none',
+    severity: 'ok' as const,
+  },
+  {
+    failure: 'Sink outage (HF 5xx)',
+    happens: 'segments accumulate on disk, retried each firing',
+    lost: 'none',
+    severity: 'ok' as const,
+  },
+  {
+    failure: 'Graceful SIGTERM',
+    happens: 'runtime drains every sink stack before exit',
+    lost: 'none',
+    severity: 'ok' as const,
+  },
+  {
+    failure: 'Disk lost',
+    happens: 'spool gone',
+    lost: 'everything unflushed — use a PVC on k8s',
+    severity: 'warn' as const,
+  },
+];
+---
+
+<section class="border-t hairline">
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <p class="eyebrow mb-5">durability</p>
+    <div class="flex flex-col gap-3 md:flex-row md:items-baseline md:justify-between">
+      <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+        The disk is the buffer.
+      </h2>
+      <p class="font-mono text-xs text-ink-faint">&mdash; disk.rs</p>
+    </div>
+    <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
+      <code class="font-mono text-sm text-ink">DiskSpool</code> is a write-ahead
+      spool: <code class="font-mono text-sm text-ink">ingest</code> appends
+      records as JSON lines to an fsynced segment file
+      <em class="text-ink not-italic">before returning</em>, and segments are
+      deleted only after the downstream sink accepted them. Replays are
+      idempotent.
+    </p>
+
+    <div class="mt-10 overflow-x-auto">
+      <table class="w-full border-collapse text-left">
+        <thead>
+          <tr class="border-b hairline">
+            <th scope="col" class="py-3 pr-6 font-mono text-xs font-normal uppercase tracking-[0.18em] text-ink-faint">failure</th>
+            <th scope="col" class="py-3 pr-6 font-mono text-xs font-normal uppercase tracking-[0.18em] text-ink-faint">what happens</th>
+            <th scope="col" class="py-3 font-mono text-xs font-normal uppercase tracking-[0.18em] text-ink-faint">data lost</th>
+          </tr>
+        </thead>
+        <tbody class="align-baseline">
+          {rows.map((r) => (
+            <tr class="border-b border-hairline/60">
+              <td class="py-4 pr-6 font-mono text-sm text-ink">{r.failure}</td>
+              <td class="py-4 pr-6 text-[0.95rem] leading-relaxed text-ink-dim">{r.happens}</td>
+              <td class={`py-4 font-mono text-sm ${r.severity === 'warn' ? 'text-warn' : 'text-accent'}`}>
+                <span class={`inline-block rounded-sm px-2 py-0.5 ${r.severity === 'warn' ? 'bg-warn-soft' : 'bg-accent-soft'}`}>
+                  {r.lost}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>

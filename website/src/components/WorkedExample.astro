@@ -1,0 +1,48 @@
+---
+const pipelines = [
+  { name: 'air_temperature', interval: '1m', shape: 'per-station readings', key: '(station_id, timestamp)' },
+  { name: 'rainfall', interval: '5m', shape: 'per-station readings', key: '(station_id, timestamp)' },
+  { name: 'pm25', interval: '1h', shape: 'regional readings', key: '(region, timestamp)' },
+];
+---
+
+<section class="border-t hairline bg-surface/30">
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <p class="eyebrow mb-5">example &middot; singapore weather &rarr; huggingface</p>
+    <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+      A real collector, not a toy.
+    </h2>
+    <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
+      The reference consumer polls Singapore's NEA / data.gov.sg realtime
+      weather via the satay-generated
+      <a href="https://github.com/InfiniteUnion/nea-rs" class="text-ink underline-offset-4 hover:text-accent hover:underline" rel="noopener">nea-rs</a>
+      client. Three pipelines, each its own tokio task, deduped by key.
+    </p>
+
+    <div class="mt-10 grid gap-px overflow-hidden rounded-sm border hairline bg-hairline md:grid-cols-3">
+      {pipelines.map((p) => (
+        <div class="bg-ground p-6">
+          <div class="flex items-baseline justify-between">
+            <span class="font-mono text-sm text-ink">{p.name}</span>
+            <span class="font-mono text-xs text-accent">{p.interval}</span>
+          </div>
+          <p class="mt-3 text-sm text-ink-dim">{p.shape}</p>
+          <p class="mt-4 font-mono text-xs text-ink-faint">
+            dedupe key: <span class="text-ink-dim">{p.key}</span>
+          </p>
+        </div>
+      ))}
+    </div>
+
+    <div class="mt-8 grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
+      <p class="text-[0.95rem] leading-relaxed text-ink-dim">
+        Each flush ships one parquet file at the deterministic Hive-style path
+        &mdash; so replays are safe and the HF dataset viewer stays happy.
+      </p>
+      <code class="block break-words rounded-sm border hairline bg-ground px-4 py-3 font-mono text-xs text-ink-dim">
+        <span class="text-ink-faint">repo:</span> <img src="/developer-icons/hugging-face.svg" alt="" class="inline-block h-3.5 w-3.5 align-text-bottom" width="14" height="14" loading="lazy" decoding="async" /> zeon256/nea-weather-test<br />
+        <span class="text-ink-faint">path:</span> data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}.parquet
+      </code>
+    </div>
+  </div>
+</section>

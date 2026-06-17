@@ -1,0 +1,86 @@
+---
+const tiers = [
+  {
+    name: 'Buffered',
+    role: 'tier 1',
+    detail: 'in-memory accumulation, flush by interval or record count',
+    swappable: true,
+  },
+  {
+    name: 'DiskSpool',
+    role: 'tier 2',
+    detail: 'write-ahead JSONL spool, fsynced before ingest returns',
+    swappable: true,
+  },
+  {
+    name: 'Terminal',
+    role: 'terminal',
+    detail: 'HfSink ships parquet to HuggingFace — or write your own',
+    swappable: true,
+    accent: true,
+  },
+];
+
+const features = [
+  { name: 'parquet', default: true, note: 'encode::to_parquet (arrow + parquet + serde_arrow)' },
+  { name: 'huggingface', default: true, note: 'HfSink + CommitAction (implies parquet)' },
+];
+---
+
+<section class="border-t hairline bg-surface/30">
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <p class="eyebrow mb-5">compose</p>
+    <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+      Swap any layer. Write your own terminal.
+    </h2>
+    <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
+      Fan-out is just another combinator (<code class="font-mono text-sm text-ink">Tee</code>).
+      With <code class="font-mono text-sm text-ink">--no-default-features</code> you
+      get the core traits, layers, spool, and runtime &mdash; bring your own
+      terminal sink.
+    </p>
+
+    <div class="mt-10 grid gap-px overflow-hidden rounded-sm border hairline bg-hairline md:grid-cols-3">
+      {tiers.map((t) => (
+        <div class={`bg-ground p-6 ${t.accent ? 'border-t-2 border-accent/60' : ''}`}>
+          <div class="flex items-baseline justify-between">
+            <span class="font-mono text-sm text-ink">{t.name}</span>
+            <span class={`font-mono text-xs ${t.accent ? 'text-accent' : 'text-ink-faint'}`}>{t.role}</span>
+          </div>
+          <p class="mt-3 text-sm leading-relaxed text-ink-dim">{t.detail}</p>
+          {t.swappable && (
+            <p class="mt-4 font-mono text-xs text-accent">&darr; swappable</p>
+          )}
+        </div>
+      ))}
+    </div>
+
+    <div class="mt-10">
+      <p class="eyebrow mb-4">feature flags</p>
+      <div class="overflow-hidden rounded-sm border hairline">
+        <table class="w-full border-collapse text-left">
+          <thead>
+            <tr class="border-b hairline bg-surface">
+              <th scope="col" class="py-3 px-5 font-mono text-xs font-normal uppercase tracking-[0.18em] text-ink-faint">feature</th>
+              <th scope="col" class="py-3 px-5 font-mono text-xs font-normal uppercase tracking-[0.18em] text-ink-faint">default</th>
+              <th scope="col" class="py-3 px-5 font-mono text-xs font-normal uppercase tracking-[0.18em] text-ink-faint">what it enables</th>
+            </tr>
+          </thead>
+          <tbody>
+            {features.map((f) => (
+              <tr class="border-b border-hairline/60">
+                <td class="py-4 px-5 font-mono text-sm text-ink">{f.name}</td>
+                <td class="py-4 px-5">
+                  <span class={`font-mono text-sm ${f.default ? 'text-accent' : 'text-ink-faint'}`}>
+                    {f.default ? '✓' : '·'}
+                  </span>
+                </td>
+                <td class="py-4 px-5 text-sm text-ink-dim">{f.note}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>

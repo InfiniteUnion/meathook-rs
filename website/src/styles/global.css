@@ -1,0 +1,155 @@
+@import "tailwindcss";
+@import "@arborium/arborium/themes/base.css";
+@import "@arborium/arborium/themes/rose-pine-moon.css";
+
+@theme {
+  /* palette — near-black spool ground, crimson accent (matches logo), semantic amber */
+  --color-ground: #0B0E10;
+  --color-surface: #14181B;
+  --color-surface-2: #1A1F23;
+  --color-hairline: #232A2F;
+  --color-ink: #E8E6E1;
+  --color-ink-dim: #8A8F93;
+  --color-ink-faint: #555B60;
+  --color-accent: #C8253B;
+  --color-accent-soft: #2E1115;
+  --color-warn: #B45309;
+  --color-warn-soft: #2A1808;
+
+  /* type — editorial serif display, humanist grotesk body, victor mono for data */
+  --font-display: "Newsreader", Georgia, serif;
+  --font-body: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Victor Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+  }
+
+  body {
+    background-color: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    font-feature-settings: "ss01", "cv01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+}
+
+@layer utilities {
+  .font-display { font-family: var(--font-display); }
+  .font-body { font-family: var(--font-body); }
+  .font-mono { font-family: var(--font-mono); }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  .hairline { border-color: var(--color-hairline); }
+
+  /* the spool band texture — faint horizontal rules for a ledger surface */
+  .spool-lines {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 1.625rem,
+      color-mix(in srgb, var(--color-hairline) 60%, transparent) 1.625rem,
+      color-mix(in srgb, var(--color-hairline) 60%, transparent) calc(1.625rem + 1px)
+    );
+  }
+}
+
+/* ── arborium syntax highlighting ────────────────────────────── */
+/* Lock the code block to rose-pine-moon (dark) regardless of system preference.
+   The base.css maps <a-*> tags to --arb-*-light in light mode; we point all
+   light vars at the dark values so the block is always dark. */
+pre[data-arborium] {
+  --arb-at-light: var(--arb-at-dark);
+  --arb-bg-light: var(--arb-bg-dark);
+  --arb-c-light: var(--arb-c-dark);
+  --arb-cb-light: var(--arb-cb-dark);
+  --arb-cd-light: var(--arb-cd-dark);
+  --arb-ch-light: var(--arb-ch-dark);
+  --arb-cn-light: var(--arb-cn-dark);
+  --arb-co-light: var(--arb-co-dark);
+  --arb-cs-light: var(--arb-cs-dark);
+  --arb-dr-light: var(--arb-dr-dark);
+  --arb-em-light: var(--arb-em-dark);
+  --arb-ex-light: var(--arb-ex-dark);
+  --arb-f-light: var(--arb-f-dark);
+  --arb-fb-light: var(--arb-fb-dark);
+  --arb-fc-light: var(--arb-fc-dark);
+  --arb-fd-light: var(--arb-fd-dark);
+  --arb-fg-light: var(--arb-fg-dark);
+  --arb-fm-light: var(--arb-fm-dark);
+  --arb-in-light: var(--arb-in-dark);
+  --arb-k-light: var(--arb-k-dark);
+  --arb-kc-light: var(--arb-kc-dark);
+  --arb-kd-light: var(--arb-kd-dark);
+  --arb-ke-light: var(--arb-ke-dark);
+  --arb-kf-light: var(--arb-kf-dark);
+  --arb-ki-light: var(--arb-ki-dark);
+  --arb-km-light: var(--arb-km-dark);
+  --arb-ko-light: var(--arb-ko-dark);
+  --arb-kp-light: var(--arb-kp-dark);
+  --arb-kr-light: var(--arb-kr-dark);
+  --arb-kt-light: var(--arb-kt-dark);
+  --arb-ky-light: var(--arb-ky-dark);
+  --arb-l-light: var(--arb-l-dark);
+  --arb-m-light: var(--arb-m-dark);
+  --arb-n-light: var(--arb-n-dark);
+  --arb-o-light: var(--arb-o-dark);
+  --arb-p-light: var(--arb-p-dark);
+  --arb-pb-light: var(--arb-pb-dark);
+  --arb-pd-light: var(--arb-pd-dark);
+  --arb-pp-light: var(--arb-pp-dark);
+  --arb-pr-light: var(--arb-pr-dark);
+  --arb-ps-light: var(--arb-ps-dark);
+  --arb-rp-light: var(--arb-rp-dark);
+  --arb-rx-light: var(--arb-rx-dark);
+  --arb-s-light: var(--arb-s-dark);
+  --arb-sc-light: var(--arb-sc-dark);
+  --arb-se-light: var(--arb-se-dark);
+  --arb-sp-light: var(--arb-sp-dark);
+  --arb-ss-light: var(--arb-ss-dark);
+  --arb-st-light: var(--arb-st-dark);
+  --arb-t-light: var(--arb-t-dark);
+  --arb-tb-light: var(--arb-tb-dark);
+  --arb-td-light: var(--arb-td-dark);
+  --arb-te-light: var(--arb-te-dark);
+  --arb-tf-light: var(--arb-tf-dark);
+  --arb-tg-light: var(--arb-tg-dark);
+  --arb-tl-light: var(--arb-tl-dark);
+  --arb-tq-light: var(--arb-tq-dark);
+  --arb-tr-light: var(--arb-tr-dark);
+  --arb-tt-light: var(--arb-tt-dark);
+  --arb-tu-light: var(--arb-tu-dark);
+  --arb-tx-light: var(--arb-tx-dark);
+  --arb-v-light: var(--arb-v-dark);
+  --arb-vb-light: var(--arb-vb-dark);
+  --arb-vm-light: var(--arb-vm-dark);
+  --arb-vp-light: var(--arb-vp-dark);
+  --arb-c-light-style: var(--arb-c-dark-style);
+  --arb-cd-light-style: var(--arb-cd-dark-style);
+  --arb-em-light-style: var(--arb-em-dark-style);
+  --arb-st-light-weight: var(--arb-st-dark-weight);
+  --arb-tu-light-decoration: var(--arb-tu-dark-decoration);
+  --arb-tt-light-weight: var(--arb-tt-dark-weight);
+  --arb-tx-light-decoration: var(--arb-tx-dark-decoration);
+}
