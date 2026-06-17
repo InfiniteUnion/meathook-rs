@@ -27,9 +27,9 @@ const terminals = [
         meathook-rs &middot; rust 2024
       </p>
       <h1 class="font-display text-[2.75rem] leading-[1.05] tracking-[-0.02em] text-ink sm:text-6xl md:text-[4.25rem]">
-        Poll an API.<br />
+        Capture ephemeral data.<br />
         Compose the sink.<br />
-        Ship it <span class="italic text-accent">— durably.</span>
+        Lose <span class="italic text-accent">nothing.</span>
       </h1>
       <p class="mt-7 max-w-[30rem] text-lg leading-relaxed text-ink-dim">
         A library-first base for long-running data collection jobs. Sinks
@@ -59,7 +59,11 @@ const terminals = [
         </button>
       </div>
 
-      <p class="mt-8 font-mono text-xs text-ink-faint">
+      <p class="mt-6 font-mono text-xs tracking-wide text-ink-faint">
+        ≤ 1 torn record on SIGKILL &middot; none on panic &middot; none on SIGTERM
+      </p>
+
+      <p class="mt-4 font-mono text-xs text-ink-faint">
         built on the <a href="https://github.com/zeon256/satay-rs" class="text-ink-dim underline-offset-4 hover:text-accent hover:underline" rel="noopener">satay-rs</a> sans-IO action model
       </p>
     </div>
