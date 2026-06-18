@@ -101,7 +101,6 @@ const terminals = [
                 </li>
               ))}
             </ul>
-            <div class="fsync-flash" data-fsync aria-hidden="true">fsync</div>
           </div>
 
           <div class="stack-frame stack-terminal" data-tier="terminal">
@@ -194,7 +193,7 @@ const terminals = [
     white-space: nowrap;
     overflow-x: auto;
   }
-  .record {
+  .record-list :global(.record) {
     opacity: 0;
     transform: translateY(-4px);
   }
@@ -203,31 +202,6 @@ const terminals = [
   .record-list :global(.record-val) { color: var(--color-accent); }
   .record-list :global(.record-st) { color: var(--color-ink-dim); }
   .record-list :global(.record-ts) { color: var(--color-ink-faint); }
-
-  .fsync-flash {
-    position: absolute;
-    right: 0.6rem;
-    bottom: 0.5rem;
-    font-family: var(--font-mono);
-    font-size: 0.625rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--color-accent);
-    background: var(--color-accent-soft);
-    border: 1px solid var(--color-accent);
-    padding: 0.1rem 0.5rem;
-    border-radius: 2px;
-    opacity: 0;
-    pointer-events: none;
-  }
-  .fsync-flash.is-flash {
-    animation: fsync 120ms ease-out;
-  }
-  @keyframes fsync {
-    0% { opacity: 0; transform: translateY(2px); }
-    50% { opacity: 1; transform: translateY(0); box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 60%, transparent); }
-    100% { opacity: 0; transform: translateY(0); }
-  }
 
   .terminal-list {
     display: flex;
@@ -258,17 +232,19 @@ const terminals = [
   .terminal-dest { color: var(--color-ink-faint); font-size: 0.6875rem; }
 
   /* load-in animation: records drop through tiers */
-  .record.is-in {
+  .record-list :global(.record.is-in) {
     animation: record-drop 280ms ease-out forwards;
     animation-delay: calc(var(--i) * 90ms + 200ms);
+  }
+  .record-list :global(.record.is-ambient) {
+    animation: record-drop 280ms ease-out forwards;
   }
   @keyframes record-drop {
     to { opacity: 1; transform: translateY(0); }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .record { opacity: 1; transform: none; animation: none !important; }
-    .fsync-flash { display: none; }
+    .record-list :global(.record) { opacity: 1; transform: none; animation: none !important; }
     .terminal-row { transition: none; }
   }
 
@@ -304,23 +280,15 @@ const terminals = [
 <script>
   const hero = document.querySelector('[data-hero]');
   const recordsEl = hero?.querySelector('[data-records]');
-  const fsyncEl = hero?.querySelector('[data-fsync]');
   const terminalRows = hero?.querySelectorAll('[data-terminal-row]');
   const spoolEl = hero?.querySelector('[data-spool]');
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   if (hero) {
-    // 1. load-in: stagger records, then fsync flash, then cycle terminal
+    // 1. load-in: stagger records, then cycle terminal
     if (!reduce && recordsEl) {
       const records = recordsEl.querySelectorAll('[data-record]');
       records.forEach((r) => r.classList.add('is-in'));
-
-      // fsync flash after records have settled
-      const lastDelay = records.length * 90 + 200 + 200;
-      window.setTimeout(() => {
-        fsyncEl?.classList.add('is-flash');
-        window.setTimeout(() => fsyncEl?.classList.remove('is-flash'), 200);
-      }, lastDelay);
     }
 
     // 2. terminal swap cycle — show all three, cycle the active highlight
@@ -360,35 +328,30 @@ const terminals = [
       ];
       let tickIdx = 0;
       let tickInterval: number | undefined;
+      let primed = false;
 
       const appendTick = () => {
         const t = ticks[tickIdx % ticks.length];
         tickIdx++;
         const li = document.createElement('li');
         li.className = 'record is-ambient';
-        li.style.color = 'var(--color-ink-faint)';
         const inner =
-          `<span class="record-dim">{</span>` +
-          `"k":"<span class="record-key">${t.k}</span>"<span class="record-dim">,</span>` +
-          `"v":<span class="record-val">${t.v}</span><span class="record-dim">,</span>` +
-          (t.st ? `"st":"<span class="record-st">${t.st}</span>"<span class="record-dim">,</span>` : '') +
-          (t.rg ? `"rg":"<span class="record-st">${t.rg}</span>"<span class="record-dim">,</span>` : '') +
-          `"ts":"<span class="record-ts">${t.ts}</span>"<span class="record-dim">}</span>`;
+          `<span class="record-dim">{</span> ` +
+          `"k":"<span class="record-key">${t.k}</span>"<span class="record-dim">,</span> ` +
+          `"v":<span class="record-val">${t.v}</span><span class="record-dim">,</span> ` +
+          (t.st ? `"st":"<span class="record-st">${t.st}</span>"<span class="record-dim">,</span> ` : '') +
+          (t.rg ? `"rg":"<span class="record-st">${t.rg}</span>"<span class="record-dim">,</span> ` : '') +
+          `"ts":"<span class="record-ts">${t.ts}</span>" <span class="record-dim">}</span>`;
         li.innerHTML = inner;
-        li.style.opacity = '0';
         recordsEl.appendChild(li);
-        // fade in
-        requestAnimationFrame(() => {
-          li.style.transition = 'opacity 600ms ease-out';
-          li.style.opacity = '1';
-        });
-        // keep the list bounded
-        if (recordsEl.children.length > 11) {
-          recordsEl.removeChild(recordsEl.firstElementChild as Element);
+        // keep the list at a fixed size — trim oldest as new ones arrive
+        while (recordsEl.children.length > 8) {
+          (recordsEl.firstElementChild as Element).remove();
         }
       };
 
       const startTick = () => {
+        appendTick();
         tickInterval = window.setInterval(appendTick, 4000);
       };
       const stopTick = () => {
@@ -398,13 +361,17 @@ const terminals = [
       // only tick while hero is on screen
       const io = new IntersectionObserver((entries) => {
         entries.forEach((e) => {
+          if (!primed) return;
           if (e.isIntersecting) startTick();
           else stopTick();
         });
       });
       io.observe(hero);
-      // start a bit after load-in
-      window.setTimeout(startTick, 2600);
+      // start right after load-in settles
+      window.setTimeout(() => {
+        primed = true;
+        startTick();
+      }, 1600);
     }
 
     // 4. copy-to-clipboard for the cargo add pill

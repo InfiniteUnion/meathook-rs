@@ -279,9 +279,9 @@ const cycleArchive = [
       countEl.textContent = `${fileCount} files`;
       // auto-scroll to bottom
       archiveList.scrollTop = archiveList.scrollHeight;
-      // keep the list bounded
-      if (archiveList.children.length > 14) {
-        archiveList.removeChild(archiveList.firstElementChild as Element);
+      // keep the list at a fixed size — trim oldest as new ones arrive
+      while (archiveList.children.length > 6) {
+        (archiveList.firstElementChild as Element).remove();
       }
     };
 

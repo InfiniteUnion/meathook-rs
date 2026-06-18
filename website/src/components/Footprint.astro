@@ -13,7 +13,7 @@ const CPU_CHART_H = CPU_H - PAD_Y * 2;
 const RSS_CHART_H = RSS_H - PAD_Y * 2;
 
 // Y scales — honest zero-baseline
-const cpuMax = 1;
+const cpuMax = 50;
 const rssMin = 0;
 const rssMax = Math.max(rss.peak_mb * 1.1, 50);
 const rssRange = rssMax - rssMin || 1;
@@ -40,6 +40,19 @@ const axisLabels = [0, Math.round(xMax * 0.5), xMax].map((t) => ({
 // Y-axis labels
 const cpuYLabels = [`${cpuMax}%`, '0%'];
 const rssYLabels = [`${rssMax}mb`, '0mb'];
+
+// Gridlines — 25/50/75 horizontal, 0/50/100 vertical
+const cpuGridY = [0.25, 0.5, 0.75].map((f) => PAD_Y + f * CPU_CHART_H);
+const rssGridY = [0.25, 0.5, 0.75].map((f) => PAD_Y + f * RSS_CHART_H);
+const gridX = [0, xMax * 0.5, xMax].map((t) => x(t));
+
+// CPU peak callout — point at the highest spike, brag in the empty space
+const cpuPeak = chart.reduce((a, b) => (b.cpu > a.cpu ? b : a), chart[0]);
+const peakX = x(cpuPeak.t);
+const peakY = yCpu(cpuPeak.cpu);
+const leaderEndX = peakX + 44;
+const leaderEndY = peakY - 44;
+const perCore = cpuPeak.cpu > 0 ? Math.floor((100 / cpuPeak.cpu) / 100) * 100 : 0;
 
 const stats = [
   { value: `${rss.avg_mb}mb`, label: 'rss avg' },
@@ -90,9 +103,18 @@ const stats = [
                   <stop offset="100%" stop-color="var(--color-accent)" stop-opacity="0.05" />
                 </linearGradient>
               </defs>
+              {cpuGridY.map((gy) => (
+                <line x1="0" y1={gy} x2={W} y2={gy} stroke="var(--color-ink-faint)" stroke-width="1" opacity="0.18" vector-effect="non-scaling-stroke" />
+              ))}
+              {gridX.map((gx) => (
+                <line x1={gx} y1="0" x2={gx} y2={CPU_H} stroke="var(--color-ink-faint)" stroke-width="1" opacity="0.18" vector-effect="non-scaling-stroke" />
+              ))}
               <path d={cpuArea} fill="url(#cpu-fill)" />
               <path d={cpuLine} fill="none" stroke="var(--color-accent)" stroke-width="1.2" vector-effect="non-scaling-stroke" />
+              <line x1={peakX} y1={peakY} x2={leaderEndX} y2={leaderEndY} stroke="var(--color-accent)" stroke-width="1" opacity="0.6" vector-effect="non-scaling-stroke" />
             </svg>
+            <div class="cpu-annot-dot" style={`left:${(peakX / W) * 100}%;top:${(peakY / CPU_H) * 100}%`}></div>
+            <div class="cpu-annot-text" style={`left:${(leaderEndX / W) * 100}%;top:${(leaderEndY / CPU_H) * 100}%`}>peak {cpuPeak.cpu}% &middot; ~{perCore}/core</div>
           </div>
 
           {/* RSS chart */}
@@ -105,6 +127,12 @@ const stats = [
                   <stop offset="100%" stop-color="var(--color-ink-dim)" stop-opacity="0.03" />
                 </linearGradient>
               </defs>
+              {rssGridY.map((gy) => (
+                <line x1="0" y1={gy} x2={W} y2={gy} stroke="var(--color-ink-faint)" stroke-width="1" opacity="0.18" vector-effect="non-scaling-stroke" />
+              ))}
+              {gridX.map((gx) => (
+                <line x1={gx} y1="0" x2={gx} y2={RSS_H} stroke="var(--color-ink-faint)" stroke-width="1" opacity="0.18" vector-effect="non-scaling-stroke" />
+              ))}
               <path d={rssArea} fill="url(#rss-fill)" />
               <path d={rssLine} fill="none" stroke="var(--color-ink-dim)" stroke-width="1" vector-effect="non-scaling-stroke" />
             </svg>
@@ -175,6 +203,28 @@ const stats = [
     display: block;
     width: 100%;
     height: auto;
+  }
+  .cpu-annot-dot {
+    position: absolute;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: var(--color-accent);
+    border: 1.5px solid var(--color-ground);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 3;
+  }
+  .cpu-annot-text {
+    position: absolute;
+    transform: translateY(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    letter-spacing: 0.08em;
+    color: var(--color-accent);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 3;
   }
   .axis-row {
     position: relative;
@@ -303,6 +353,7 @@ const stats = [
     .stats-grid {
       grid-template-columns: repeat(2, auto);
     }
+    .cpu-annot-text { display: none; }
   }
 </style>
 
