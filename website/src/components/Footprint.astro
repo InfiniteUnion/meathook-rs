@@ -1,0 +1,373 @@
+---
+import footprint from '../data/footprint.json';
+
+const { samples, duration_label, cpu, rss, chart } = footprint;
+
+// Chart dimensions
+const W = 480;
+const CPU_H = 64;
+const RSS_H = 40;
+const PAD_X = 0;
+const PAD_Y = 4;
+const CPU_CHART_H = CPU_H - PAD_Y * 2;
+const RSS_CHART_H = RSS_H - PAD_Y * 2;
+
+// Y scales — honest zero-baseline
+const cpuMax = 1;
+const rssMin = 0;
+const rssMax = Math.max(rss.peak_mb * 1.1, 50);
+const rssRange = rssMax - rssMin || 1;
+
+// X scale: chart is 0..(samples*2) seconds → 0..W
+const xMax = chart[chart.length - 1].t || 1;
+const x = (t) => PAD_X + (t / xMax) * (W - PAD_X * 2);
+const yCpu = (v) => PAD_Y + CPU_CHART_H - (v / cpuMax) * CPU_CHART_H;
+const yRss = (v) => PAD_Y + RSS_CHART_H - ((v - rssMin) / rssRange) * RSS_CHART_H;
+
+// Build SVG paths
+const cpuLine = chart.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(p.t).toFixed(1)} ${yCpu(p.cpu).toFixed(1)}`).join(' ');
+const cpuArea = `${cpuLine} L ${x(xMax).toFixed(1)} ${yCpu(0).toFixed(1)} L ${x(0).toFixed(1)} ${yCpu(0).toFixed(1)} Z`;
+const rssLine = chart.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(p.t).toFixed(1)} ${yRss(p.rss).toFixed(1)}`).join(' ');
+const rssArea = `${rssLine} L ${x(xMax).toFixed(1)} ${yRss(rssMin).toFixed(1)} L ${x(0).toFixed(1)} ${yRss(rssMin).toFixed(1)} Z`;
+
+// X-axis labels — percentage-based positioning
+const axisLabels = [0, Math.round(xMax * 0.5), xMax].map((t) => ({
+  t,
+  label: t >= 60 ? `${Math.round(t / 60)}m` : `${t}s`,
+  pct: (t / xMax) * 100,
+}));
+
+// Y-axis labels
+const cpuYLabels = [`${cpuMax}%`, '0%'];
+const rssYLabels = [`${rssMax}mb`, '0mb'];
+
+const stats = [
+  { value: `${rss.avg_mb}mb`, label: 'rss avg' },
+  { value: `${cpu.avg}%`, label: 'cpu avg' },
+  { value: `${rss.peak_mb}mb`, label: 'rss peak' },
+  { value: `${cpu.peak}%`, label: 'cpu peak' },
+  { value: duration_label, label: 'sampled' },
+  { value: String(samples), label: 'samples' },
+];
+---
+
+<section class="border-t hairline">
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <p class="eyebrow mb-5">footprint</p>
+    <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+      A year-long collector that fits in {rss.peak_mb} megabytes.
+    </h2>
+    <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
+      A release binary polling three NEA weather endpoints on a single tokio
+      runtime. I/O-bound between ticks; memory stays flat.
+    </p>
+
+    <div class="mt-12 flex flex-col gap-10">
+      {/* charts */}
+      <div class="footprint-chart min-w-0">
+        <div class="chart-with-yaxis">
+          {/* Y-axis column — outside chart-interact, interaction geometry unchanged */}
+          <div class="y-axis-col">
+            <div class="y-axis-section" style="flex-grow: 64">
+              <span class="y-tick">{cpuYLabels[0]}</span>
+              <span class="y-tick">{cpuYLabels[1]}</span>
+            </div>
+            <div class="y-axis-section" style="flex-grow: 40">
+              <span class="y-tick">{rssYLabels[0]}</span>
+              <span class="y-tick">{rssYLabels[1]}</span>
+            </div>
+            <div class="y-axis-spacer"></div>
+          </div>
+
+          <div class="chart-interact" data-chart-interact>
+          {/* CPU chart */}
+          <div class="chart-block">
+            <span class="chart-label">cpu %</span>
+            <svg viewBox={`0 0 ${W} ${CPU_H}`} class="chart-svg" preserveAspectRatio="none" role="img" aria-label="CPU usage over time">
+              <defs>
+                <linearGradient id="cpu-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--color-accent)" stop-opacity="0.35" />
+                  <stop offset="100%" stop-color="var(--color-accent)" stop-opacity="0.05" />
+                </linearGradient>
+              </defs>
+              <path d={cpuArea} fill="url(#cpu-fill)" />
+              <path d={cpuLine} fill="none" stroke="var(--color-accent)" stroke-width="1.2" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>
+
+          {/* RSS chart */}
+          <div class="chart-block">
+            <span class="chart-label">rss mb</span>
+            <svg viewBox={`0 0 ${W} ${RSS_H}`} class="chart-svg" preserveAspectRatio="none" role="img" aria-label="RSS memory over time, stable and flat">
+              <defs>
+                <linearGradient id="rss-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--color-ink-dim)" stop-opacity="0.2" />
+                  <stop offset="100%" stop-color="var(--color-ink-dim)" stop-opacity="0.03" />
+                </linearGradient>
+              </defs>
+              <path d={rssArea} fill="url(#rss-fill)" />
+              <path d={rssLine} fill="none" stroke="var(--color-ink-dim)" stroke-width="1" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>
+
+          {/* x-axis */}
+          <div class="axis-row">
+            {axisLabels.map((a) => (
+              <span class="axis-tick" style={`left: ${a.pct}%`}>{a.label}</span>
+            ))}
+          </div>
+
+          {/* hover overlay — captures mouse/touch, sits above charts */}
+          <div class="chart-overlay" data-overlay></div>
+
+          {/* crosshair — spans full height through both charts and axis */}
+          <div class="crosshair" data-crosshair hidden></div>
+
+          {/* tooltip — fixed above CPU chart, moves horizontally */}
+          <div class="tooltip" data-tooltip hidden>
+            <span class="tooltip-time" data-tooltip-time></span>
+            <span class="tooltip-row"><span class="tooltip-label">cpu</span><span class="tooltip-val" data-tooltip-cpu></span></span>
+            <span class="tooltip-row"><span class="tooltip-label">rss</span><span class="tooltip-val" data-tooltip-rss></span></span>
+          </div>
+          </div>
+        </div>
+      </div>
+
+      {/* stats row */}
+      <div class="stats-grid">
+        {stats.map((s) => (
+          <div class="stat-cell">
+            <span class="stat-value">{s.value}</span>
+            <span class="stat-label">{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <p class="mt-10 font-mono text-xs text-ink-faint">
+      sampled live from a release binary running the
+      <a href="https://github.com/zeon256/meathook-rs/blob/main/examples/nea_weather.rs" class="text-ink-dim underline-offset-4 hover:text-accent hover:underline" rel="noopener">nea example</a>
+    </p>
+  </div>
+</section>
+
+<style>
+  .footprint-chart {
+    width: 100%;
+  }
+  .chart-block {
+    position: relative;
+    margin-bottom: 0.5rem;
+  }
+  .chart-label {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .axis-row {
+    position: relative;
+    height: 1rem;
+    margin-top: 0.25rem;
+  }
+  .axis-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    color: var(--color-ink-faint);
+  }
+  .axis-tick:first-child {
+    transform: translateX(0);
+  }
+  .axis-tick:last-child {
+    transform: translateX(-100%);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(6, auto);
+    gap: 0.75rem 1.75rem;
+    align-content: start;
+  }
+  .stat-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    color: var(--color-ink);
+  }
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+  .chart-with-yaxis {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .y-axis-col {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 2.25rem;
+  }
+  .y-axis-section {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 2px 0;
+  }
+  .y-axis-spacer {
+    height: 1.25rem;
+    flex-shrink: 0;
+  }
+  .y-tick {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    color: var(--color-ink-faint);
+    text-align: right;
+    line-height: 1;
+  }
+  .chart-interact {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .chart-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    cursor: crosshair;
+  }
+  .crosshair {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--color-accent);
+    opacity: 0.4;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .crosshair[hidden] { display: none; }
+  .tooltip {
+    position: absolute;
+    top: 0;
+    transform: translate(-50%, -100%);
+    margin-top: -8px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    padding: 0.4rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+  .tooltip[hidden] { display: none; }
+  .tooltip-time { color: var(--color-ink); font-weight: 600; }
+  .tooltip-row { display: flex; gap: 0.5rem; }
+  .tooltip-label { color: var(--color-ink-faint); }
+  .tooltip-val { color: var(--color-ink-dim); }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: repeat(3, auto);
+      gap: 0.75rem 1.5rem;
+    }
+  }
+  @media (max-width: 480px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, auto);
+    }
+  }
+</style>
+
+<script type="application/json" id="footprint-data" set:html={JSON.stringify({ chart, xMax })} />
+
+<script>
+  const interact = document.querySelector('[data-chart-interact]') as HTMLElement | null;
+  const overlay = interact?.querySelector('[data-overlay]') as HTMLElement | null;
+  const crosshair = interact?.querySelector('[data-crosshair]') as HTMLElement | null;
+  const tooltip = interact?.querySelector('[data-tooltip]') as HTMLElement | null;
+  const ttTime = tooltip?.querySelector('[data-tooltip-time]') as HTMLElement | null;
+  const ttCpu = tooltip?.querySelector('[data-tooltip-cpu]') as HTMLElement | null;
+  const ttRss = tooltip?.querySelector('[data-tooltip-rss]') as HTMLElement | null;
+
+  if (interact && overlay && crosshair && tooltip) {
+    const dataEl = document.getElementById('footprint-data');
+    const raw = dataEl?.textContent || '[]';
+    const { chart: pts, xMax: maxX } = JSON.parse(raw);
+    const step = pts.length > 1 ? pts[1].t - pts[0].t : maxX;
+
+    const fmtTime = (t: number) => {
+      if (t < 60) return `${t}s`;
+      const m = Math.floor(t / 60);
+      const s = Math.round(t % 60);
+      return s > 0 ? `${m}m ${s}s` : `${m}m`;
+    };
+
+    const move = (clientX: number) => {
+      const rect = interact.getBoundingClientRect();
+      const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const targetT = relX * maxX;
+      const idx = Math.max(0, Math.min(pts.length - 1, Math.round(targetT / step)));
+      const p = pts[idx];
+      const pxX = (p.t / maxX) * rect.width;
+
+      crosshair.style.left = `${pxX}px`;
+      crosshair.hidden = false;
+
+      if (ttTime) ttTime.textContent = fmtTime(p.t);
+      if (ttCpu) ttCpu.textContent = `${p.cpu}%`;
+      if (ttRss) ttRss.textContent = `${p.rss}mb`;
+
+      tooltip.style.left = `${pxX}px`;
+      if (relX > 0.85) {
+        tooltip.style.transform = 'translate(-100%, -100%)';
+      } else if (relX < 0.15) {
+        tooltip.style.transform = 'translate(0, -100%)';
+      } else {
+        tooltip.style.transform = 'translate(-50%, -100%)';
+      }
+      tooltip.hidden = false;
+    };
+
+    const hide = () => {
+      crosshair.hidden = true;
+      tooltip.hidden = true;
+    };
+
+    overlay.addEventListener('mousemove', (e) => move(e.clientX));
+    overlay.addEventListener('mouseleave', hide);
+    overlay.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      if (touch) move(touch.clientX);
+    }, { passive: false });
+    overlay.addEventListener('touchend', hide);
+  }
+</script>

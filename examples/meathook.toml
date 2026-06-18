@@ -10,7 +10,7 @@ every = "10m"
 max_records = 50_000
 
 [sink.huggingface]
-repo = "zeon256/nea-weather-test"
+repo = "zeon256/nea-weather-test2"
 branch = "main"
 
 [collectors.air_temperature]
