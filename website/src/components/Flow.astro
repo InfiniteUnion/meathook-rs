@@ -58,7 +58,7 @@ const axisMarks = [0, 15, 30, 45, 60];
                   {Array.from({ length: minutes }, (_, i) => (
                     <div class="tick-cell">
                       {lane.tickAt(i) && (
-                        <span class={`tick tick-${lane.size}`}></span>
+                        <span class={`tick tick-${lane.size}`} style={`--minute:${i}`}></span>
                       )}
                     </div>
                   ))}
@@ -154,19 +154,25 @@ const axisMarks = [0, 15, 30, 45, 60];
   .tick {
     display: block;
     border-radius: 50%;
-    background: var(--color-accent);
+    background: var(--color-ink-faint);
     opacity: 0;
     transition: opacity 400ms ease-out;
     transition-delay: calc(var(--lane-idx, 0) * 120ms);
   }
   .flow-chart.is-revealed .tick {
-    opacity: 0.85;
+    opacity: 0.35;
+  }
+  .flow-chart.is-revealed .tick.is-lit {
+    background: var(--color-accent);
+    opacity: 0.9;
   }
   .tick-sm { width: 3px; height: 3px; }
   .tick-md { width: 5px; height: 5px; }
   .tick-lg {
     width: 8px;
     height: 8px;
+  }
+  .tick-lg.is-lit {
     box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 50%, transparent);
   }
 
@@ -181,6 +187,7 @@ const axisMarks = [0, 15, 30, 45, 60];
     overflow: hidden;
   }
   .scan-line {
+    display: none;
     position: absolute;
     top: 0;
     bottom: 0;
@@ -189,6 +196,7 @@ const axisMarks = [0, 15, 30, 45, 60];
     background: var(--color-accent);
     opacity: 0;
     box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent);
+    transition: opacity 300ms ease-out;
   }
 
   /* time axis */
@@ -298,6 +306,7 @@ const axisMarks = [0, 15, 30, 45, 60];
 
   @media (prefers-reduced-motion: reduce) {
     .tick { opacity: 0.85 !important; transition: none !important; }
+    .tick { background: var(--color-accent); }
     .scan-line { display: none; }
     .flush-fill { width: 100% !important; opacity: 0.5; }
     .flush-output { opacity: 1 !important; transform: none !important; }
@@ -313,6 +322,7 @@ const axisMarks = [0, 15, 30, 45, 60];
   const scanLine = flow?.querySelector('[data-scan-line]') as HTMLElement | null;
   const flushFill = flow?.querySelector('[data-flush-fill]') as HTMLElement | null;
   const flushOutput = flow?.querySelector('[data-flush-output]') as HTMLElement | null;
+  const ticks = flow ? Array.from(flow.querySelectorAll('.tick')) as HTMLElement[] : [];
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   if (flow) {
@@ -324,12 +334,20 @@ const axisMarks = [0, 15, 30, 45, 60];
     }
 
     // 2. scan line sweep + flush pulse loop
-    if (!reduce && scanLine && flushFill) {
+    if (!reduce && flushFill) {
       let progress = 0;
       let lastTime = 0;
       let running = false;
       let rafId = 0;
       const duration = 8000;
+      const totalMinutes = 60;
+
+      const updateTicks = (nextProgress: number) => {
+        ticks.forEach((tick) => {
+          const minute = Number(tick.style.getPropertyValue('--minute'));
+          tick.classList.toggle('is-lit', (minute + 1) / totalMinutes <= nextProgress);
+        });
+      };
 
       const frame = (time: number) => {
         if (!running) return;
@@ -340,7 +358,9 @@ const axisMarks = [0, 15, 30, 45, 60];
 
         if (progress >= 1) {
           // flush event
-          scanLine.style.left = '100%';
+          scanLine?.style.setProperty('left', '100%');
+          scanLine?.style.setProperty('opacity', '0');
+          updateTicks(1);
           flushFill.style.width = '100%';
           flushFill.classList.add('is-flushed');
           flushOutput?.classList.add('is-visible');
@@ -351,16 +371,21 @@ const axisMarks = [0, 15, 30, 45, 60];
             flushOutput?.classList.remove('is-visible');
             progress = 0;
             lastTime = 0;
-            scanLine.style.left = '0%';
+            scanLine?.style.setProperty('left', '0%');
+            updateTicks(0);
             flushFill.style.width = '0%';
             if (running) {
+              scanLine?.style.setProperty('opacity', '0.9');
               rafId = requestAnimationFrame(frame);
+            } else {
+              scanLine?.style.setProperty('opacity', '0');
             }
           }, 1200);
           return;
         }
 
-        scanLine.style.left = `${progress * 100}%`;
+        scanLine?.style.setProperty('left', `${progress * 100}%`);
+        updateTicks(progress);
         flushFill.style.width = `${progress * 100}%`;
         rafId = requestAnimationFrame(frame);
       };
@@ -369,11 +394,14 @@ const axisMarks = [0, 15, 30, 45, 60];
         if (running) return;
         running = true;
         lastTime = 0;
+        updateTicks(progress);
+        scanLine?.style.setProperty('opacity', '0.9');
         rafId = requestAnimationFrame(frame);
       };
       const stop = () => {
         running = false;
         if (rafId) cancelAnimationFrame(rafId);
+        scanLine?.style.setProperty('opacity', '0');
       };
 
       const io = new IntersectionObserver(

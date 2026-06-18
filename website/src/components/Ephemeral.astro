@@ -188,11 +188,11 @@ const cycleArchive = [
     line-height: 1.8;
     color: var(--color-ink-dim);
   }
-  .archive-file {
+  .archive-list :global(.archive-file) {
     opacity: 1;
     transition: opacity 300ms ease-out;
   }
-  .archive-file.is-new {
+  .archive-list :global(.archive-file.is-new) {
     opacity: 0;
     animation: archive-land 400ms ease-out forwards;
   }
@@ -200,7 +200,7 @@ const cycleArchive = [
     0% { opacity: 0; transform: translateY(-6px); }
     100% { opacity: 1; transform: translateY(0); }
   }
-  .archive-file::before {
+  .archive-list :global(.archive-file)::before {
     content: '▪';
     color: var(--color-accent);
     margin-right: 0.5rem;
@@ -210,7 +210,7 @@ const cycleArchive = [
 
   @media (prefers-reduced-motion: reduce) {
     .ephemeral-reading { transition: none; opacity: 1 !important; }
-    .archive-file { animation: none !important; opacity: 1 !important; }
+    .archive-list :global(.archive-file) { animation: none !important; opacity: 1 !important; }
   }
 
   @media (max-width: 640px) {

@@ -198,11 +198,11 @@ const terminals = [
     opacity: 0;
     transform: translateY(-4px);
   }
-  .record-dim { color: var(--color-ink-faint); }
-  .record-key { color: var(--color-ink); }
-  .record-val { color: var(--color-accent); }
-  .record-st { color: var(--color-ink-dim); }
-  .record-ts { color: var(--color-ink-faint); }
+  .record-list :global(.record-dim) { color: var(--color-ink-faint); }
+  .record-list :global(.record-key) { color: var(--color-ink); }
+  .record-list :global(.record-val) { color: var(--color-accent); }
+  .record-list :global(.record-st) { color: var(--color-ink-dim); }
+  .record-list :global(.record-ts) { color: var(--color-ink-faint); }
 
   .fsync-flash {
     position: absolute;
