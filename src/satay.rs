@@ -1,5 +1,5 @@
-//! [`SatayCollector`]: adapter turning any satay-generated API client into a
-//! [`Collector`].
+//! [`SatayCollector`]: optional adapter (feature `satay`) turning any
+//! satay-generated API client into a [`Collector`].
 //!
 //! Satay actions implement [`satay_runtime::Action`] and are consumed by
 //! `request()`, and generated actions borrow their `Api` — so a fresh action

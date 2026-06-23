@@ -1,6 +1,10 @@
 <h1 align="center">meathook</h1>
 
 <p align="center">
+  <img src="logo.png" alt="meathook" width="180">
+</p>
+
+<p align="center">
   <a href="https://crates.io/crates/meathook-rs"><img src="https://img.shields.io/crates/v/meathook-rs" alt="Crates.io"></a>
   <a href="https://docs.rs/meathook-rs"><img src="https://img.shields.io/docsrs/meathook-rs" alt="Docs.rs"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache--2.0%2FMIT-blue" alt="License"></a>
@@ -8,13 +12,17 @@
 </p>
 
 <p align="center">
-  A library-first base for long-running data collection jobs: poll APIs on an interval,
-  buffer samples into time windows, and ship them to long-term storage — durably.
+  A durable collection runtime: poll APIs on an interval, buffer samples
+  into time windows, and ship them to long-term storage — durably.
 </p>
 
 <p align="center">
-  Built on the <a href="https://github.com/zeon256/satay-rs">satay-rs</a> sans-IO action model.
-  HuggingFace datasets (parquet) supported as a terminal sink out of the box.
+  Core traits, sink combinators, and the supervised runtime are IO-stack
+  free. Optional adapters sit on top: <code>SatayCollector</code> (feature
+  <code>satay</code>) adapts any
+  <a href="https://github.com/zeon256/satay-rs">satay-rs</a>-generated client,
+  and a sans-IO HuggingFace parquet sink ships out of the box
+  (feature <code>huggingface</code>).
 </p>
 
 ## How it works
@@ -124,13 +132,15 @@ firing.
 
 ## Feature flags
 
-| Feature | Default | What it enables |
-|---|---|---|
-| `parquet` | ✓ | `encode::to_parquet` (arrow + parquet + serde_arrow) |
-| `huggingface` | ✓ | `HfSink` + `CommitAction` (implies `parquet`) |
+| Feature | Default | Implies | What it enables |
+|---|---|---|---|
+| `parquet` | ✓ | — | `encode::to_parquet` (arrow + parquet + serde_arrow) |
+| `satay` | — | — | `SatayCollector`: any satay-generated API client as a `Collector` |
+| `huggingface` | ✓ | `parquet`, `satay` | `HfSink` + sans-IO `CommitAction` |
 
-With `--no-default-features` you get the core traits, layers, spool, and
-runtime — bring your own terminal sink.
+With `--no-default-features` you get the core traits, sink combinators,
+write-ahead spool, and supervised runtime — no HTTP/IO stack pulled in
+(transitively satay-free) — bring your own collector and terminal sink.
 
 ## Configuration
 

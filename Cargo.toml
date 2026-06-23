@@ -13,13 +13,12 @@ path = "src/lib.rs"
 [features]
 default = ["parquet", "huggingface"]
 parquet = ["dep:arrow", "dep:parquet", "dep:serde_arrow"]
-huggingface = ["parquet", "dep:base64"]
+satay = ["dep:satay-runtime", "dep:satay-reqwest"]
+huggingface = ["parquet", "satay", "dep:base64"]
 
 [dependencies]
 http = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
-satay-runtime = { version = "0.1.2", features = ["json"] }
-satay-reqwest = "0.1.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -32,6 +31,8 @@ arrow = { version = "58", optional = true }
 parquet = { version = "58", optional = true }
 serde_arrow = { version = "0.14.1", features = ["arrow-58"], optional = true }
 base64 = { version = "0.22", optional = true }
+satay-runtime = { version = "0.1.2", features = ["json"], optional = true }
+satay-reqwest = { version = "0.1.2", optional = true }
 
 [dev-dependencies]
 anyhow = "1"
