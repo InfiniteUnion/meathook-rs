@@ -12,8 +12,9 @@
 </p>
 
 <p align="center">
-  A durable collection runtime: poll APIs on an interval, buffer samples
-  into time windows, and ship them to long-term storage — durably.
+  A polling runtime with composable, durable sinks: poll a source on an
+  interval, buffer samples into time windows, and ship them to long-term
+  storage — durably.
 </p>
 
 <p align="center">

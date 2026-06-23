@@ -1,7 +1,8 @@
 //! # meathook
 //!
-//! A durable collection runtime: poll APIs on an interval, buffer samples
-//! into time windows, and ship them to long-term storage — durably.
+//! A polling runtime with composable, durable sinks: poll a source on an
+//! interval, buffer samples into time windows, and ship them to long-term
+//! storage — durably.
 //!
 //! The core (traits, sink combinators, write-ahead spool, supervised
 //! runtime) is free of any HTTP/IO stack dependency: with

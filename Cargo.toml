@@ -2,7 +2,7 @@
 name = "meathook-rs"
 version = "0.1.0"
 edition = "2024"
-description = "Periodic API data collector with composable, durable sinks"
+description = "A polling runtime with composable, durable sinks"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
