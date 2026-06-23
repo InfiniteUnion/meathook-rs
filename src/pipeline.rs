@@ -7,7 +7,8 @@ use std::collections::HashSet;
 use std::hash::Hash;
 use std::time::Duration;
 
-use time::OffsetDateTime;
+use ::time::OffsetDateTime;
+use tokio::time;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -92,7 +93,7 @@ where
             warn!(pipeline = %name, %error, "startup flush failed");
         }
 
-        let mut interval = tokio::time::interval(self.poll_interval);
+        let mut interval = time::interval(self.poll_interval);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
@@ -201,7 +202,7 @@ mod tests {
         let handle = tokio::spawn(pipeline.run(cancel.clone()));
 
         // Paused clock auto-advances: sleep past three ticks.
-        tokio::time::sleep(Duration::from_secs(150)).await;
+        time::sleep(Duration::from_secs(150)).await;
         cancel.cancel();
         handle.await.unwrap();
 
@@ -250,7 +251,7 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let handle = tokio::spawn(pipeline.run(cancel.clone()));
-        tokio::time::sleep(Duration::from_secs(250)).await;
+        time::sleep(Duration::from_secs(250)).await;
         cancel.cancel();
         handle.await.unwrap();
 

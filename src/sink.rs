@@ -1,5 +1,6 @@
 //! The [`Sink`] trait and window metadata passed alongside records.
 
+use std::error;
 use std::future::Future;
 
 use time::OffsetDateTime;
@@ -26,7 +27,7 @@ pub struct WindowMeta {
 /// [`SinkExt`](crate::SinkExt) for the combinators.
 pub trait Sink<R>: Send {
     /// Concrete error type (a `thiserror` enum, not a boxed error).
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: error::Error + Send + Sync + 'static;
 
     /// Hand records to this layer. A buffering layer may hold them; a
     /// terminal sink ships them immediately.

@@ -3,6 +3,7 @@
 
 use arrow::datatypes::FieldRef;
 use parquet::arrow::ArrowWriter;
+use parquet::errors::ParquetError;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_arrow::schema::{SchemaLike, TracingOptions};
@@ -15,7 +16,7 @@ pub enum EncodeError {
     #[error("failed to build record batch: {0}")]
     Batch(#[source] serde_arrow::Error),
     #[error("failed to write parquet: {0}")]
-    Parquet(#[from] parquet::errors::ParquetError),
+    Parquet(#[from] ParquetError),
 }
 
 /// Encode records into a parquet file held in memory.
@@ -28,7 +29,7 @@ pub fn to_parquet<R: Serialize + DeserializeOwned>(records: &[R]) -> Result<Vec<
         Vec::<FieldRef>::from_type::<R>(TracingOptions::default()).map_err(EncodeError::Schema)?;
     let batch = serde_arrow::to_record_batch(&fields, &records).map_err(EncodeError::Batch)?;
 
-    let mut buf = Vec::new();
+    let mut buf = vec![];
     let mut writer = ArrowWriter::try_new(&mut buf, batch.schema(), None)?;
     writer.write(&batch)?;
     writer.close()?;

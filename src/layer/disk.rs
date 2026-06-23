@@ -18,7 +18,9 @@
 //! the filename alone — leftover segments from a crashed run replay with
 //! their original window and land at the same storage path (idempotent).
 
+use std::error;
 use std::fs;
+use std::io;
 use std::io::Write;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -35,13 +37,13 @@ use crate::sink::{Sink, WindowMeta};
 #[derive(Debug, thiserror::Error)]
 pub enum SpoolError<E>
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: error::Error + Send + Sync + 'static,
 {
     #[error("spool I/O error at {path}: {source}")]
     Io {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("failed to serialize record for spooling: {0}")]
     Serialize(#[source] serde_json::Error),
@@ -118,7 +120,7 @@ where
     R: Serialize + DeserializeOwned + Send + 'static,
     S: Sink<R>,
 {
-    fn io_err(path: &Path, source: std::io::Error) -> SpoolError<S::Error> {
+    fn io_err(path: &Path, source: io::Error) -> SpoolError<S::Error> {
         SpoolError::Io {
             path: path.to_owned(),
             source,
@@ -154,7 +156,7 @@ where
 
     /// All segment files in the spool dir, oldest first.
     fn list_segments(&self) -> Result<Vec<(i64, PathBuf)>, SpoolError<S::Error>> {
-        let mut segments = Vec::new();
+        let mut segments = vec![];
         let entries = fs::read_dir(&self.dir).map_err(|e| Self::io_err(&self.dir, e))?;
         for entry in entries {
             let entry = entry.map_err(|e| Self::io_err(&self.dir, e))?;
@@ -182,7 +184,7 @@ where
         let window = self.align(OffsetDateTime::now_utc().unix_timestamp());
         let path = self.segment_path(window);
 
-        let mut lines = Vec::new();
+        let mut lines = vec![];
         for record in records {
             serde_json::to_writer(&mut lines, record).map_err(SpoolError::Serialize)?;
             lines.push(b'\n');
@@ -217,7 +219,7 @@ where
         path: &Path,
     ) -> Result<(), SpoolError<S::Error>> {
         let contents = fs::read_to_string(path).map_err(|e| Self::io_err(path, e))?;
-        let lines: Vec<&str> = contents.lines().filter(|l| !l.is_empty()).collect();
+        let lines = contents.lines().filter(|l| !l.is_empty()).collect::<Vec<&str>>();
         let mut records = Vec::with_capacity(lines.len());
         let last = lines.len().saturating_sub(1);
         for (i, line) in lines.iter().enumerate() {
@@ -349,7 +351,7 @@ mod tests {
         spool.ingest(&meta("p"), vec![3]).await.unwrap();
 
         // Records are on disk before any flush fires.
-        let files: Vec<_> = fs::read_dir(&spool_dir).unwrap().collect();
+        let files = fs::read_dir(&spool_dir).unwrap().collect::<Vec<_>>();
         assert_eq!(files.len(), 1);
         let contents = fs::read_to_string(files[0].as_ref().unwrap().path()).unwrap();
         assert_eq!(contents.lines().count(), 3);
