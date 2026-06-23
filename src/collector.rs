@@ -1,5 +1,6 @@
 //! The [`Collector`] trait: a source that produces a batch of records per tick.
 
+use std::error;
 use std::future::Future;
 
 /// A source polled by a [`Pipeline`](crate::Pipeline) on an interval.
@@ -11,7 +12,7 @@ pub trait Collector: Send {
     /// The row-shaped record this collector produces.
     type Record: Send + 'static;
     /// Concrete error type (a `thiserror` enum, not a boxed error).
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: error::Error + Send + Sync + 'static;
 
     /// Name of this collector; used as the pipeline name in
     /// [`WindowMeta`](crate::WindowMeta) and for tracing.

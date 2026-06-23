@@ -47,3 +47,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [[example]]
 name = "nea_weather"
 required-features = ["huggingface"]
+
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/zeon256/style-rust-aku", branch = "main" }
+]

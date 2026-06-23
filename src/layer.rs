@@ -4,9 +4,11 @@
 //! its own [`FlushPolicy`]. Each layer owns its records until *its* policy
 //! fires, then pushes downstream.
 
+use std::error;
+use std::path;
 use std::time::Duration;
 
-use time::OffsetDateTime;
+use ::time::OffsetDateTime;
 use tokio::time::Instant;
 use tracing::debug;
 
@@ -63,7 +65,7 @@ pub trait SinkExt<R>: Sink<R> + Sized {
     /// `spool_root.join(pipeline_name)`.
     fn spooled(
         self,
-        dir: impl Into<std::path::PathBuf>,
+        dir: impl Into<path::PathBuf>,
         policy: FlushPolicy,
     ) -> DiskSpool<R, Self> {
         DiskSpool::new(dir, policy, self)
@@ -105,7 +107,7 @@ struct Window {
 impl<R, S> Buffered<R, S> {
     pub fn new(policy: FlushPolicy, inner: S) -> Self {
         Self {
-            buf: Vec::new(),
+            buf: vec![],
             window: None,
             policy,
             inner,
@@ -189,8 +191,8 @@ pub struct Tee<A, B>(pub A, pub B);
 #[derive(Debug, thiserror::Error)]
 pub enum TeeError<A, B>
 where
-    A: std::error::Error + Send + Sync + 'static,
-    B: std::error::Error + Send + Sync + 'static,
+    A: error::Error + Send + Sync + 'static,
+    B: error::Error + Send + Sync + 'static,
 {
     #[error("tee: first sink failed: {0}")]
     First(#[source] A),
@@ -240,6 +242,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::time;
     use crate::test_util::{SharedSink, meta};
 
     #[tokio::test]
@@ -268,7 +271,7 @@ mod tests {
         sink.ingest(&meta("p"), vec![1]).await.unwrap();
         assert!(inner.batches().is_empty());
 
-        tokio::time::advance(Duration::from_secs(301)).await;
+        time::advance(Duration::from_secs(301)).await;
         sink.ingest(&meta("p"), vec![2]).await.unwrap();
 
         let batches = inner.batches();

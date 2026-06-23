@@ -9,10 +9,15 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::hash::Hash;
+use std::io;
 use std::pin::Pin;
 use std::time::Duration;
 
+use tokio::signal;
+use tokio::signal::unix;
+use tokio::task;
 use tokio::task::JoinSet;
+use tokio::time;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -28,7 +33,7 @@ type PipelineFactory = Box<dyn Fn(CancellationToken) -> PipelineFuture + Send + 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
     #[error("failed to install signal handler: {0}")]
-    Signal(#[source] std::io::Error),
+    Signal(#[source] io::Error),
 }
 
 /// Builder for the [`Meathook`] runtime.
@@ -43,7 +48,7 @@ pub struct MeathookBuilder {
 impl Default for MeathookBuilder {
     fn default() -> Self {
         Self {
-            factories: Vec::new(),
+            factories: vec![],
             max_consecutive_failures: 5,
             base_backoff: Duration::from_secs(1),
             failure_window: Duration::from_secs(300),
@@ -114,16 +119,16 @@ impl Meathook {
         let signal_cancel = cancel.clone();
 
         #[cfg(unix)]
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        let mut sigterm = unix::signal(unix::SignalKind::terminate())
             .map_err(RuntimeError::Signal)?;
         tokio::spawn(async move {
             #[cfg(unix)]
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => info!("received ctrl-c; shutting down"),
+                _ = signal::ctrl_c() => info!("received ctrl-c; shutting down"),
                 _ = sigterm.recv() => info!("received SIGTERM; shutting down"),
             }
             #[cfg(not(unix))]
-            if tokio::signal::ctrl_c().await.is_ok() {
+            if signal::ctrl_c().await.is_ok() {
                 info!("received ctrl-c; shutting down");
             }
             signal_cancel.cancel();
@@ -145,7 +150,7 @@ impl Meathook {
 
         let mut join_set = JoinSet::new();
         let mut states: Vec<PipelineState> = Vec::with_capacity(factories.len());
-        let mut task_pipeline: HashMap<tokio::task::Id, usize> = HashMap::new();
+        let mut task_pipeline: HashMap<task::Id, usize> = HashMap::new();
 
         for (index, factory) in factories.iter().enumerate() {
             let handle = join_set.spawn(factory(cancel.child_token()));
@@ -207,7 +212,7 @@ impl Meathook {
 
             tokio::select! {
                 _ = cancel.cancelled() => continue,
-                _ = tokio::time::sleep(backoff) => {}
+                _ = time::sleep(backoff) => {}
             }
 
             state.spawned_at = Instant::now();
@@ -278,7 +283,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let handle = tokio::spawn(runtime.run_with_shutdown(cancel.clone()));
 
-        tokio::time::sleep(Duration::from_secs(200)).await;
+        time::sleep(Duration::from_secs(200)).await;
         cancel.cancel();
         handle.await.unwrap();
 
@@ -319,7 +324,7 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let handle = tokio::spawn(runtime.run_with_shutdown(cancel.clone()));
-        tokio::time::sleep(Duration::from_secs(3600)).await;
+        time::sleep(Duration::from_secs(3600)).await;
         cancel.cancel();
         handle.await.unwrap();
 

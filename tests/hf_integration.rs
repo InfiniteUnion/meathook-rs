@@ -8,6 +8,8 @@
 
 #![cfg(feature = "huggingface")]
 
+use std::env;
+
 use meathook::{HfSink, Sink as _, WindowMeta};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -22,8 +24,8 @@ struct Sample {
 #[tokio::test]
 #[ignore = "requires HF_TOKEN and MEATHOOK_TEST_REPO with write access"]
 async fn commits_parquet_window_to_scratch_repo() {
-    let token = std::env::var("HF_TOKEN").expect("HF_TOKEN must be set");
-    let repo = std::env::var("MEATHOOK_TEST_REPO").expect("MEATHOOK_TEST_REPO must be set");
+    let token = env::var("HF_TOKEN").expect("HF_TOKEN must be set");
+    let repo = env::var("MEATHOOK_TEST_REPO").expect("MEATHOOK_TEST_REPO must be set");
 
     let mut sink = HfSink::new(reqwest::Client::new(), repo, token);
     let now = OffsetDateTime::now_utc();

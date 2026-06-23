@@ -13,8 +13,10 @@ use std::marker::PhantomData;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use http::header;
 use satay_reqwest::ReqwestActionExt;
 use satay_runtime::{Action, RequestParts, ResponseParts, insert_header, into_request};
+use serde::de;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -112,7 +114,7 @@ impl Action for CommitAction {
             &format!("Bearer {}", self.token),
         )?;
         insert_header(&mut headers, "content-type", "application/x-ndjson")?;
-        if let Some(auth) = headers.get_mut(http::header::AUTHORIZATION) {
+        if let Some(auth) = headers.get_mut(header::AUTHORIZATION) {
             auth.set_sensitive(true);
         }
 
@@ -199,7 +201,7 @@ fn object_path(meta: &WindowMeta) -> String {
 
 impl<R> Sink<R> for HfSink<R>
 where
-    R: Serialize + serde::de::DeserializeOwned + Send + 'static,
+    R: Serialize + de::DeserializeOwned + Send + 'static,
 {
     type Error = HfSinkError;
 
@@ -277,7 +279,7 @@ mod tests {
         );
 
         let body = String::from_utf8(request.body().clone()).unwrap();
-        let lines: Vec<&str> = body.lines().collect();
+        let lines = body.lines().collect::<Vec<&str>>();
         assert_eq!(lines.len(), 2);
 
         let header: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
