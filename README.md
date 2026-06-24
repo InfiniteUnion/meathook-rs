@@ -1,7 +1,7 @@
 <h1 align="center">meathook</h1>
 
 <p align="center">
-  <img src="logo.png" alt="meathook" width="500">
+  <img src="logo.png" alt="meathook" width="200">
 </p>
 
 <p align="center">
