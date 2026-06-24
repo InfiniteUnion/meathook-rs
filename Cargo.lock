@@ -1328,9 +1328,9 @@ dependencies = [
 
 [[package]]
 name = "nea-rs"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59c94f5f9aec17001af71e5d2de95be4becc5c2a0880c3f2bf95575f68a6c581"
+checksum = "94dfc83d3487e6a3d48c67469d008cb48167008442eacb3492e766ae4e9d9ea0"
 dependencies = [
  "http",
  "nutype",
@@ -1882,9 +1882,9 @@ dependencies = [
 
 [[package]]
 name = "satay-reqwest"
-version = "0.1.4"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48d66a96971a406824e74e18b99e0da29186c7bc3dd39b54d50782fe8e7c29c4"
+checksum = "de885e4fe3e7ffb8f1d1c8e9e10f706d9357ab99dde50d633f2140a08f052531"
 dependencies = [
  "reqwest",
  "satay-runtime",
@@ -1893,9 +1893,9 @@ dependencies = [
 
 [[package]]
 name = "satay-runtime"
-version = "0.1.4"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8f694facaffeec376d0fe71ea0d6035262d4519178e595d3772b83f49c36ebc"
+checksum = "948550184ec0ff3090acc0867c7b843d63ec4761a03f1c12bdecd43b895588d1"
 dependencies = [
  "fast-float2",
  "http",

@@ -219,7 +219,10 @@ where
         path: &Path,
     ) -> Result<(), SpoolError<S::Error>> {
         let contents = fs::read_to_string(path).map_err(|e| Self::io_err(path, e))?;
-        let lines = contents.lines().filter(|l| !l.is_empty()).collect::<Vec<&str>>();
+        let lines = contents
+            .lines()
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<&str>>();
         let mut records = Vec::with_capacity(lines.len());
         let last = lines.len().saturating_sub(1);
         for (i, line) in lines.iter().enumerate() {

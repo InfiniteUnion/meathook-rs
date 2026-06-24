@@ -63,11 +63,7 @@ pub trait SinkExt<R>: Sink<R> + Sized {
     /// The pipeline name recorded in replayed [`WindowMeta`] is derived from
     /// the last component of `dir`, so point each pipeline at
     /// `spool_root.join(pipeline_name)`.
-    fn spooled(
-        self,
-        dir: impl Into<path::PathBuf>,
-        policy: FlushPolicy,
-    ) -> DiskSpool<R, Self> {
+    fn spooled(self, dir: impl Into<path::PathBuf>, policy: FlushPolicy) -> DiskSpool<R, Self> {
         DiskSpool::new(dir, policy, self)
     }
 
@@ -242,8 +238,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time;
     use crate::test_util::{SharedSink, meta};
+    use tokio::time;
 
     #[tokio::test]
     async fn buffered_holds_until_max_records() {
