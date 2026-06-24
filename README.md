@@ -1,7 +1,7 @@
 <h1 align="center">meathook</h1>
 
 <p align="center">
-  <img src="logo.png" alt="meathook" width="180">
+  <img src="logo.png" alt="meathook" width="500">
 </p>
 
 <p align="center">
@@ -197,3 +197,8 @@ at your option.
 [`SatayCollector`]: https://docs.rs/meathook-rs/latest/meathook/satay/struct.SatayCollector.html
 [`FlushPolicy`]: https://docs.rs/meathook-rs/latest/meathook/layer/struct.FlushPolicy.html
 [`Meathook`]: https://docs.rs/meathook-rs/latest/meathook/runtime/struct.Meathook.html
+
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
