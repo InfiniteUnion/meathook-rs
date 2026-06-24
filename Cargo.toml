@@ -6,6 +6,9 @@ rust-version = "1.88"
 description = "A polling runtime with composable, durable sinks"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+documentation = "https://docs.rs/meathook-rs"
+homepage = "https://github.com/InfiniteUnion/meathook-rs"
+repository = "https://github.com/InfiniteUnion/meathook-rs"
 exclude = [
     "website/",
     ".github/",
