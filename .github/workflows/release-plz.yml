@@ -1,0 +1,86 @@
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/build.rs"
+      - "tests/**"
+      - ".github/actions/setup-rust/**"
+  workflow_dispatch:
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Run release-plz release
+        id: release-plz
+        uses: release-plz/action@49c995b2442b0f60dd4aab07a164cc00643471fc # v0.5.128
+        with:
+          command: release
+          version: "0.3.157"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build release binaries
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          set -euo pipefail
+
+          TAG=$(echo "$RELEASES" | jq -r '.[] | select(.package_name == "satay-cli") | .tag')
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "satay-cli was not released, skipping binary upload"
+            exit 0
+          fi
+
+          gh workflow run release-binaries.yml -f tag="$TAG"
+
+  release-plz-pr:
+    name: Release-plz PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Run release-plz PR
+        uses: release-plz/action@49c995b2442b0f60dd4aab07a164cc00643471fc # v0.5.128
+        with:
+          command: release-pr
+          version: "0.3.157"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
