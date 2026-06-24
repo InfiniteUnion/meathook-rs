@@ -43,7 +43,7 @@ tick(interval) ──► Collector::collect() ──► Vec<Record> ──► Si
 
 - **[`Collector`]** produces a batch of row-shaped records per tick.
   [`SatayCollector`] adapts any satay-generated client (e.g.
-  [nea-rs](https://github.com/zeon256/nea-rs)) into a collector.
+  [nea-rs](https://github.com/InfiniteUnion/nea-rs)) into a collector.
 - **[`Sink`]** receives records. Each layer owns its records until *its*
   [`FlushPolicy`] fires (interval elapsed / max records / explicit `flush()`),
   then pushes downstream. Fan-out is just another combinator (`Tee`).
