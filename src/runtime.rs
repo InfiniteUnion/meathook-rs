@@ -119,8 +119,8 @@ impl Meathook {
         let signal_cancel = cancel.clone();
 
         #[cfg(unix)]
-        let mut sigterm = unix::signal(unix::SignalKind::terminate())
-            .map_err(RuntimeError::Signal)?;
+        let mut sigterm =
+            unix::signal(unix::SignalKind::terminate()).map_err(RuntimeError::Signal)?;
         tokio::spawn(async move {
             #[cfg(unix)]
             tokio::select! {
