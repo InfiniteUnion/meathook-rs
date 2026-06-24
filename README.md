@@ -9,6 +9,7 @@
   <a href="https://docs.rs/meathook-rs"><img src="https://img.shields.io/docsrs/meathook-rs" alt="Docs.rs"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-Apache--2.0%2FMIT-blue" alt="License"></a>
   <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img src="https://img.shields.io/badge/Rust-2024-blue" alt="Rust Edition"></a>
+  <a href="https://github.com/InfiniteUnion/meathook-rs/blob/main/Cargo.toml"><img src="https://img.shields.io/crates/msrv/meathook-rs" alt="MSRV"></a>
 </p>
 
 <p align="center">
