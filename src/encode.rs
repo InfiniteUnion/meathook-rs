@@ -24,6 +24,11 @@ pub enum EncodeError {
 /// The arrow schema is derived from `R` itself (not sampled from values, so
 /// an empty slice still produces a valid zero-row file), which is why
 /// `DeserializeOwned` is required alongside `Serialize`.
+///
+/// # Errors
+///
+/// Returns an error if schema derivation, record batch construction, or
+/// parquet writing fails.
 pub fn to_parquet<R: Serialize + DeserializeOwned>(records: &[R]) -> Result<Vec<u8>, EncodeError> {
     let fields =
         Vec::<FieldRef>::from_type::<R>(TracingOptions::default()).map_err(EncodeError::Schema)?;
@@ -39,6 +44,7 @@ pub fn to_parquet<R: Serialize + DeserializeOwned>(records: &[R]) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::array::RecordBatch;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use serde::Deserialize;
 
@@ -71,9 +77,10 @@ mod tests {
             .build()
             .unwrap();
         let batches: Vec<_> = reader.collect::<Result<_, _>>().unwrap();
-        assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 2);
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
 
-        let round_tripped: Vec<Sample> = serde_arrow::from_record_batch(&batches[0]).unwrap();
+        let round_tripped = serde_arrow::from_record_batch::<Vec<Sample>>(&batches[0]).unwrap();
+
         assert_eq!(round_tripped, records);
     }
 

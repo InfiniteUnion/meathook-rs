@@ -32,16 +32,19 @@ pub struct FlushPolicy {
 }
 
 impl FlushPolicy {
+    #[must_use]
     pub const fn new(every: Duration, max_records: usize) -> Self {
         Self { every, max_records }
     }
 
     /// Flush on age only, never on record count.
+    #[must_use]
     pub const fn every(every: Duration) -> Self {
         Self::new(every, usize::MAX)
     }
 
     /// One-hour windows, no record cap.
+    #[must_use]
     pub const fn hourly() -> Self {
         Self::every(Duration::from_secs(3600))
     }
@@ -54,6 +57,7 @@ impl FlushPolicy {
 /// ```
 pub trait SinkExt<R>: Sink<R> + Sized {
     /// Wrap `self` in an in-memory buffering tier.
+    #[must_use]
     fn buffered(self, policy: FlushPolicy) -> Buffered<R, Self> {
         Buffered::new(policy, self)
     }
@@ -63,11 +67,13 @@ pub trait SinkExt<R>: Sink<R> + Sized {
     /// The pipeline name recorded in replayed [`WindowMeta`] is derived from
     /// the last component of `dir`, so point each pipeline at
     /// `spool_root.join(pipeline_name)`.
+    #[must_use]
     fn spooled(self, dir: impl Into<path::PathBuf>, policy: FlushPolicy) -> DiskSpool<R, Self> {
         DiskSpool::new(dir, policy, self)
     }
 
     /// Fan out: every batch is ingested into both `self` and `other`.
+    #[must_use]
     fn tee<B: Sink<R>>(self, other: B) -> Tee<Self, B> {
         Tee(self, other)
     }
@@ -101,6 +107,7 @@ struct Window {
 }
 
 impl<R, S> Buffered<R, S> {
+    #[must_use]
     pub fn new(policy: FlushPolicy, inner: S) -> Self {
         Self {
             buf: vec![],
@@ -111,6 +118,7 @@ impl<R, S> Buffered<R, S> {
     }
 
     /// Access the wrapped sink.
+    #[must_use]
     pub fn inner(&self) -> &S {
         &self.inner
     }

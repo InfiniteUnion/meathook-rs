@@ -1,4 +1,4 @@
-//! [`HfSink`]: terminal sink committing parquet files to a HuggingFace
+//! [`HfSink`]: terminal sink committing parquet files to a `HuggingFace`
 //! dataset repo.
 //!
 //! Sans-IO, satay-style: a hand-written [`CommitAction`] implements
@@ -6,7 +6,7 @@
 //! `satay_reqwest::ReqwestActionExt::send_with` — the same transport path as
 //! every collector. A satay-*generated* HF client isn't possible yet
 //! (satay-codegen rejects non-JSON request bodies; NDJSON gets first-class
-//! OpenAPI treatment only in 3.2 `itemSchema`); once one exists, swapping it
+//! `OpenAPI` treatment only in 3.2 `itemSchema`); once one exists, swapping it
 //! in is a drop-in change behind the `Action` boundary.
 
 use std::marker::PhantomData;
@@ -23,7 +23,7 @@ use tracing::info;
 use crate::encode::{self, EncodeError};
 use crate::sink::{Sink, WindowMeta};
 
-/// Error from the HuggingFace sink.
+/// Error from the `HuggingFace` sink.
 #[derive(Debug, thiserror::Error)]
 pub enum HfSinkError {
     #[error(transparent)]
@@ -37,7 +37,7 @@ pub enum HfSinkError {
     },
 }
 
-/// One commit of a single file to a HuggingFace dataset repo, as a sans-IO
+/// One commit of a single file to a `HuggingFace` dataset repo, as a sans-IO
 /// [`Action`]: `POST /api/datasets/{repo}/commit/{branch}` with an NDJSON
 /// payload (commit header line + base64-inlined file line).
 #[derive(Debug, Clone)]
@@ -143,7 +143,7 @@ impl Action for CommitAction {
 }
 
 /// Terminal sink: encodes each ingested window to parquet and commits it to
-/// a HuggingFace dataset repo at a deterministic, Hive-style path:
+/// a `HuggingFace` dataset repo at a deterministic, Hive-style path:
 ///
 /// ```text
 /// data/{pipeline}/{YYYY-MM-DD}/{HH}.parquet
@@ -169,8 +169,9 @@ pub struct HfSink<R> {
 
 impl<R> HfSink<R> {
     /// Sink committing to `repo` (e.g. `"zeon256/sg-weather"`) on branch
-    /// `main`. The token is a HuggingFace access token with write access,
+    /// `main`. The token is a `HuggingFace` access token with write access,
     /// typically from the `HF_TOKEN` env var.
+    #[must_use]
     pub fn new(client: reqwest::Client, repo: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
             client,
@@ -181,6 +182,7 @@ impl<R> HfSink<R> {
         }
     }
 
+    #[must_use]
     pub fn branch(mut self, branch: impl Into<String>) -> Self {
         self.branch = branch.into();
         self
@@ -308,7 +310,7 @@ mod tests {
             CommitOutcome::Committed(c) => {
                 assert_eq!(c.commit_oid.as_deref(), Some("abc123"));
             }
-            other => panic!("expected Committed, got {other:?}"),
+            other @ CommitOutcome::Rejected { .. } => panic!("expected Committed, got {other:?}"),
         }
 
         let rejected = CommitAction::decode(ResponseParts {
@@ -322,7 +324,7 @@ mod tests {
                 assert_eq!(status, http::StatusCode::UNAUTHORIZED);
                 assert_eq!(body, "Invalid credentials");
             }
-            other => panic!("expected Rejected, got {other:?}"),
+            other @ CommitOutcome::Committed(_) => panic!("expected Rejected, got {other:?}"),
         }
     }
 

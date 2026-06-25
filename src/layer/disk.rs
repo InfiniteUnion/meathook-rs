@@ -76,12 +76,13 @@ impl<R, S> DiskSpool<R, S> {
     /// Create a spool rooted at `dir`. The pipeline name used when
     /// reconstructing [`WindowMeta`] for replayed segments is the last
     /// component of `dir`.
+    #[must_use]
     pub fn new(dir: impl Into<PathBuf>, policy: FlushPolicy, inner: S) -> Self {
         let dir = dir.into();
-        let pipeline = dir
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unknown".to_owned());
+        let pipeline = dir.file_name().map_or_else(
+            || "unknown".to_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         Self {
             pipeline,
             dir,
@@ -95,6 +96,7 @@ impl<R, S> DiskSpool<R, S> {
     }
 
     /// Override the pipeline name derived from the directory.
+    #[must_use]
     pub fn with_pipeline_name(mut self, name: impl Into<String>) -> Self {
         self.pipeline = name.into();
         self

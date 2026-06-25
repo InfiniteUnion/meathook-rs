@@ -1,5 +1,5 @@
 //! Reference meathook consumer: collects NEA (data.gov.sg) realtime weather
-//! readings and ships hourly parquet windows to a HuggingFace dataset repo.
+//! readings and ships hourly parquet windows to a `HuggingFace` dataset repo.
 //!
 //! Each pipeline's stack is `DiskSpool → HfSink`: every tick is appended to
 //! an fsynced JSONL segment before the ingest returns (write-ahead), and the
@@ -68,8 +68,7 @@ impl Config {
     fn interval(&self, collector: &str) -> Duration {
         self.collectors
             .get(collector)
-            .map(|c| c.interval)
-            .unwrap_or(Duration::from_secs(60))
+            .map_or(Duration::from_secs(60), |c| c.interval)
     }
 }
 
@@ -152,25 +151,25 @@ impl Ctx {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,meathook=debug".into()),
         )
         .init();
+}
 
-    let config_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "examples/meathook.toml".to_owned());
-    let config: Config = toml::from_str(
-        &std::fs::read_to_string(&config_path)
+fn load_config(config_path: &str) -> anyhow::Result<Config> {
+    toml::from_str(
+        &std::fs::read_to_string(config_path)
             .with_context(|| format!("reading config {config_path}"))?,
     )
-    .with_context(|| format!("parsing config {config_path}"))?;
+    .with_context(|| format!("parsing config {config_path}"))
+}
 
-    let ctx = Ctx {
+fn ctx_from_config(config: &Config) -> anyhow::Result<Ctx> {
+    Ok(Ctx {
         client: reqwest::Client::new(),
         api_key: std::env::var("X_API_KEY").ok(),
         repo: config.sink.huggingface.repo.clone(),
@@ -178,7 +177,72 @@ async fn main() -> anyhow::Result<()> {
         token: std::env::var("HF_TOKEN").context("HF_TOKEN must be set")?,
         spool_dir: config.spool_dir.clone(),
         policy: FlushPolicy::new(config.flush.every, config.flush.max_records),
-    };
+    })
+}
+
+fn flatten_air_temperature(response: AirTemperatureOperationResponse) -> Vec<StationReading> {
+    match response {
+        AirTemperatureOperationResponse::Ok(ok) => {
+            flatten_station_data(&ok.data.stations, &ok.data.readings)
+        }
+        other => {
+            warn!(?other, "air_temperature returned non-ok response");
+            Vec::new()
+        }
+    }
+}
+
+fn flatten_rainfall(response: RainfallOperationResponse) -> Vec<StationReading> {
+    match response {
+        RainfallOperationResponse::Ok(ok) => {
+            flatten_station_data(&ok.data.stations, &ok.data.readings)
+        }
+        other => {
+            warn!(?other, "rainfall returned non-ok response");
+            Vec::new()
+        }
+    }
+}
+
+fn flatten_pm25(response: Pm25OperationResponse) -> Vec<RegionReading> {
+    match response {
+        Pm25OperationResponse::Ok(ok) => ok
+            .data
+            .items
+            .iter()
+            .flat_map(|item| {
+                let timestamp = fmt_ts(item.timestamp);
+                let regional = &item.readings.pm25_one_hourly;
+                [
+                    ("east", regional.east),
+                    ("west", regional.west),
+                    ("north", regional.north),
+                    ("south", regional.south),
+                    ("central", regional.central),
+                ]
+                .map(|(region, value)| RegionReading {
+                    region: region.to_owned(),
+                    timestamp: timestamp.clone(),
+                    value: f64::from(u16::from(value)),
+                })
+            })
+            .collect(),
+        other => {
+            warn!(?other, "pm25 returned non-ok response");
+            Vec::new()
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    init_tracing();
+
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "examples/meathook.toml".to_owned());
+    let config = load_config(&config_path)?;
+    let ctx = ctx_from_config(&config)?;
 
     let air_temperature = {
         let ctx = ctx.clone();
@@ -192,15 +256,7 @@ async fn main() -> anyhow::Result<()> {
                     let api = api.clone();
                     async move { api.air_temperature().send_with(&client).await }
                 },
-                |response| match response {
-                    AirTemperatureOperationResponse::Ok(ok) => {
-                        flatten_station_data(&ok.data.stations, &ok.data.readings)
-                    }
-                    other => {
-                        warn!(?other, "air_temperature returned non-ok response");
-                        Vec::new()
-                    }
-                },
+                flatten_air_temperature,
             );
             Pipeline::new(collector, ctx.spooled_hf("air_temperature"), interval)
                 .with_key_fn(|r: &StationReading| (r.station_id.clone(), r.timestamp.clone()))
@@ -219,15 +275,7 @@ async fn main() -> anyhow::Result<()> {
                     let api = api.clone();
                     async move { api.rainfall().send_with(&client).await }
                 },
-                |response| match response {
-                    RainfallOperationResponse::Ok(ok) => {
-                        flatten_station_data(&ok.data.stations, &ok.data.readings)
-                    }
-                    other => {
-                        warn!(?other, "rainfall returned non-ok response");
-                        Vec::new()
-                    }
-                },
+                flatten_rainfall,
             );
             Pipeline::new(collector, ctx.spooled_hf("rainfall"), interval)
                 .with_key_fn(|r: &StationReading| (r.station_id.clone(), r.timestamp.clone()))
@@ -246,33 +294,7 @@ async fn main() -> anyhow::Result<()> {
                     let api = api.clone();
                     async move { api.pm25().send_with(&client).await }
                 },
-                |response| match response {
-                    Pm25OperationResponse::Ok(ok) => ok
-                        .data
-                        .items
-                        .iter()
-                        .flat_map(|item| {
-                            let timestamp = fmt_ts(item.timestamp);
-                            let regional = &item.readings.pm25_one_hourly;
-                            [
-                                ("east", regional.east),
-                                ("west", regional.west),
-                                ("north", regional.north),
-                                ("south", regional.south),
-                                ("central", regional.central),
-                            ]
-                            .map(|(region, value)| RegionReading {
-                                region: region.to_owned(),
-                                timestamp: timestamp.clone(),
-                                value: f64::from(u16::from(value)),
-                            })
-                        })
-                        .collect(),
-                    other => {
-                        warn!(?other, "pm25 returned non-ok response");
-                        Vec::new()
-                    }
-                },
+                flatten_pm25,
             );
             Pipeline::new(collector, ctx.spooled_hf("pm25"), interval)
                 .with_key_fn(|r: &RegionReading| (r.region.clone(), r.timestamp.clone()))

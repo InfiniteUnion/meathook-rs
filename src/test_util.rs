@@ -31,6 +31,7 @@ impl<R> Clone for SharedSink<R> {
 }
 
 impl<R> SharedSink<R> {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             batches: Arc::default(),
@@ -43,16 +44,19 @@ impl<R> SharedSink<R> {
         self.fail.store(fail, Ordering::SeqCst);
     }
 
+    #[must_use]
     pub fn flushed(&self) -> bool {
         self.flushed.load(Ordering::SeqCst)
     }
 }
 
 impl<R: Clone> SharedSink<R> {
+    #[must_use]
     pub fn batches(&self) -> Vec<(WindowMeta, Vec<R>)> {
         self.batches.lock().unwrap().clone()
     }
 
+    #[must_use]
     pub fn records(&self) -> Vec<R> {
         self.batches()
             .into_iter()
@@ -82,6 +86,7 @@ impl<R: Send + 'static> Sink<R> for SharedSink<R> {
 }
 
 /// A `WindowMeta` for tests.
+#[must_use]
 pub fn meta(pipeline: &str) -> WindowMeta {
     let now = OffsetDateTime::now_utc();
     WindowMeta {
