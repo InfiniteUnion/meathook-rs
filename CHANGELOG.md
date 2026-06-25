@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/InfiniteUnion/meathook-rs/compare/v0.1.1...v0.1.2) - 2026-06-25
+
+### Other
+
+- adhere to a more strict set of clippy lints
+
 ## [0.1.1](https://github.com/InfiniteUnion/meathook-rs/compare/v0.1.0...v0.1.1) - 2026-06-24
 
 ### Added
