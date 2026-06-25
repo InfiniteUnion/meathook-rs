@@ -1,4 +1,4 @@
-//! Network integration test against a real (scratch) HuggingFace dataset
+//! Network integration test against a real (scratch) `HuggingFace` dataset
 //! repo. Ignored by default; run with:
 //!
 //! ```bash

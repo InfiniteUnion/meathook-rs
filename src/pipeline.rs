@@ -39,6 +39,7 @@ impl<C, S> Pipeline<C, S>
 where
     C: Collector,
 {
+    #[must_use]
     pub fn new(collector: C, sink: S, poll_interval: Duration) -> Self {
         Self {
             collector,
@@ -57,6 +58,7 @@ where
     /// Dedupe records across consecutive polls by the given key.
     ///
     /// Typical key for station readings: `(station_id, timestamp)`.
+    #[must_use]
     pub fn with_key_fn<F2, K2>(self, key_fn: F2) -> Pipeline<C, S, F2, K2>
     where
         F2: FnMut(&C::Record) -> K2,
@@ -98,8 +100,8 @@ where
 
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = interval.tick() => self.tick(&name).await,
+                () = cancel.cancelled() => break,
+                _instant = interval.tick() => self.tick(&name).await,
             }
         }
 
@@ -176,7 +178,7 @@ mod tests {
         type Record = (usize, usize);
         type Error = Infallible;
 
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "fake"
         }
 
@@ -226,7 +228,7 @@ mod tests {
             type Record = usize;
             type Error = FlakyError;
 
-            fn name(&self) -> &str {
+            fn name(&self) -> &'static str {
                 "flaky"
             }
 

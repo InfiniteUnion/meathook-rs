@@ -60,6 +60,7 @@ impl MeathookBuilder {
     /// Register a pipeline via its factory. The factory is invoked for the
     /// initial spawn and again after every panic, so the whole stack
     /// (collector, sink layers, spool recovery) is rebuilt fresh.
+    #[must_use]
     pub fn pipeline<C, S, F, K, Make>(mut self, factory: Make) -> Self
     where
         Make: Fn() -> Pipeline<C, S, F, K> + Send + Sync + 'static,
@@ -75,22 +76,29 @@ impl MeathookBuilder {
 
     /// Give up respawning a pipeline after this many consecutive panics
     /// (default 5).
+    #[must_use]
     pub fn max_consecutive_failures(mut self, max: u32) -> Self {
         self.max_consecutive_failures = max;
         self
     }
 
     /// Base delay for the exponential respawn backoff (default 1s).
+    #[must_use]
     pub fn base_backoff(mut self, base: Duration) -> Self {
         self.base_backoff = base;
         self
     }
 
+    #[must_use]
     pub fn build(self) -> Meathook {
         Meathook { builder: self }
     }
 
     /// Shorthand for `.build().run()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot install its signal handler.
     pub async fn run(self) -> Result<(), RuntimeError> {
         self.build().run().await
     }
@@ -108,12 +116,17 @@ struct PipelineState {
 }
 
 impl Meathook {
+    #[must_use]
     pub fn builder() -> MeathookBuilder {
         MeathookBuilder::default()
     }
 
     /// Run until SIGTERM/ctrl-c, then drain every pipeline's sink stack
     /// before returning.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the runtime cannot install its signal handler.
     pub async fn run(self) -> Result<(), RuntimeError> {
         let cancel = CancellationToken::new();
         let signal_cancel = cancel.clone();
@@ -211,8 +224,8 @@ impl Meathook {
             );
 
             tokio::select! {
-                _ = cancel.cancelled() => continue,
-                _ = time::sleep(backoff) => {}
+                () = cancel.cancelled() => continue,
+                () = time::sleep(backoff) => {}
             }
 
             state.spawned_at = Instant::now();
@@ -243,15 +256,13 @@ mod tests {
         type Record = usize;
         type Error = Infallible;
 
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "panics-once"
         }
 
         async fn collect(&mut self) -> Result<Vec<usize>, Infallible> {
             let call = self.global_calls.fetch_add(1, Ordering::SeqCst);
-            if call == 0 {
-                panic!("boom");
-            }
+            assert!(call != 0, "boom");
             Ok(vec![call])
         }
     }
@@ -298,7 +309,7 @@ mod tests {
         impl Collector for AlwaysPanics {
             type Record = usize;
             type Error = Infallible;
-            fn name(&self) -> &str {
+            fn name(&self) -> &'static str {
                 "always-panics"
             }
             async fn collect(&mut self) -> Result<Vec<usize>, Infallible> {

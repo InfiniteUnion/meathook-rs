@@ -40,6 +40,7 @@ pub struct SatayCollector<M, T, Fut, Rec> {
 }
 
 impl<M, T, Fut, Rec> SatayCollector<M, T, Fut, Rec> {
+    #[must_use]
     pub fn new(name: impl Into<String>, client: reqwest::Client, make: M, transform: T) -> Self {
         Self {
             name: name.into(),
