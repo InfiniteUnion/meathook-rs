@@ -6,10 +6,10 @@
 
 ## TL;DR
 
-Streaming needs **~no sink changes**. `DiskSpool` already windows on its own
-wall clock (`src/layer/disk.rs`, `DiskSpool::append` — `self.align(now_unix)`)
-and ignores the collector-passed `WindowMeta::start` for segment assignment;
-`Buffered` builds its own `meta` in `drain` (`src/layer.rs`). The entire sink
+Streaming needs **~no sink changes**. `Tier` already windows on its own
+wall clock (`src/layer/tier.rs` — `self.align(meta.end)`, the batch handover
+time) and ignores the collector-passed `WindowMeta::start` for window
+assignment; drained `meta` is rebuilt from the window key. The entire sink
 stack works unchanged for a push source. The only wrong-for-streaming code is
 `Pipeline::run`'s `sleep(interval) → collect()` loop. Adding streaming is a
 **pipeline-loop + builder-seam change**, not a sink change. Fully backward
@@ -19,7 +19,7 @@ compatible — existing `Pipeline` (pull/interval/dedupe) stays untouched.
 
 | What | Status | Change needed |
 |---|---|---|
-| `Sink`, `Buffered`, `DiskSpool`, `HfSink` | already streaming-ready | none |
+| `Sink`, `Tier` (+ `Store` backends), `HfSink` | already streaming-ready | none |
 | `Collector` trait (pull) | unchanged | none |
 | `Pipeline` (pull/interval/dedupe) | unchanged | none |
 | `MeathookBuilder`, supervisor, factory respawn | extends | add `.source(factory)` seam |
@@ -130,11 +130,11 @@ machinery.
   problem that belongs in a sink layer (`Dedupe` combinator, future work),
   not the pipeline loop. Ship streaming without it.
 - **Windowing**: arrival-time. `meta.start = OffsetDateTime::now_utc()` at
-  ingest. `DiskSpool` already aligns to wall clock, so this is consistent.
-  Event-time windowing (extracting `timestamp` from the record) is deferred
-  — would require `DiskSpool`/`Buffered` to honor `meta.start` (currently
-  ignored) and a `time_fn` extractor. Note this as a known limitation for
-  out-of-order/replay sources.
+  ingest. `Tier` already aligns `meta.end` to wall clock, so this is
+  consistent. Event-time windowing (extracting `timestamp` from the record)
+  is deferred — would require `Tier` to window on a record-derived timestamp
+  (currently `meta.end`) and a `time_fn` extractor. Note this as a known
+  limitation for out-of-order/replay sources.
 - **Backpressure**: deferred to the user's channel upstream. Document the
   pattern (`mpsc::channel(capacity)` → `ReceiverStream` → `Source` via
   blanket impl).
@@ -142,7 +142,7 @@ machinery.
 ## What stays the same (explicitly)
 
 - `Collector`, `Pipeline`, `with_key_fn`, dedupe — untouched.
-- `Sink`, `Buffered`, `DiskSpool`, `SpoolError`, `FlushPolicy`, `SinkExt` —
+- `Sink`, `Tier`, the `Store` backends, `FlushPolicy`, `SinkExt` —
   untouched.
 - `HfSink`, `CommitAction`, encode, satay adapter — untouched.
 - `MeathookBuilder::pipeline`, supervisor, signal handling, factory respawn
@@ -153,7 +153,7 @@ machinery.
 ## Example (when implemented)
 
 `examples/stream_demo.rs` — an `mpsc`-backed source demonstrating backpressure
-through a `Buffered` + `DiskSpool` stack:
+through a mem-tier + jsonl-tier stack:
 
 ```rust
 let (tx, rx) = mpsc::channel::<Result<Vec<TempReading>, Never>>(64);
@@ -165,8 +165,8 @@ tokio::spawn(async move {
 Meathook::builder()
     .source(move || {
         let sink = HfSink::new(client.clone(), "you/sensor", token.clone())
-            .buffered(FlushPolicy::every(Duration::from_secs(60)))
-            .spooled(spool_dir.join("sensor"), FlushPolicy::hourly());
+            .tier(MemStore::new(), FlushPolicy::every(Duration::from_secs(60)))
+            .tier(JsonlStore::new(spool_dir.join("sensor")), FlushPolicy::hourly());
         StreamPipeline::new(
             NamedStream::new("sensor", ReceiverStream::new(rx)),
             sink,
@@ -179,7 +179,7 @@ Meathook::builder()
 
 - `StreamPipeline` drains on cancel (records since last flush reach the sink).
 - Source error is non-fatal (stream keeps going after a failed `next()`).
-- Bounded channel applies backpressure: a slow `DiskSpool` flush stalls the
+- Bounded channel applies backpressure: a slow spool-tier flush stalls the
   consumer, the producer's `send().await` blocks (paused-clock timing test).
 - `NamedStream` wrapper carries the name into tracing.
 - Factory respawn rebuilds the source on panic (mirror

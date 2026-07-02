@@ -59,7 +59,7 @@ impl Default for MeathookBuilder {
 impl MeathookBuilder {
     /// Register a pipeline via its factory. The factory is invoked for the
     /// initial spawn and again after every panic, so the whole stack
-    /// (collector, sink layers, spool recovery) is rebuilt fresh.
+    /// (collector, sink layers, store recovery) is rebuilt fresh.
     #[must_use]
     pub fn pipeline<C, S, F, K, Make>(mut self, factory: Make) -> Self
     where

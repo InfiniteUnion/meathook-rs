@@ -153,12 +153,10 @@ impl Action for CommitAction {
 /// after upload but before the spool segment was deleted) overwrites the
 /// same file with the same content — replays are idempotent.
 ///
-/// Retry/backoff is *not* handled here: an upstream [`DiskSpool`] or
-/// [`Buffered`] tier retains records when this sink errors and retries at
-/// its next firing.
+/// Retry/backoff is *not* handled here: an upstream [`Tier`] retains
+/// records when this sink errors and retries at its next firing.
 ///
-/// [`DiskSpool`]: crate::DiskSpool
-/// [`Buffered`]: crate::Buffered
+/// [`Tier`]: crate::Tier
 pub struct HfSink<R> {
     client: reqwest::Client,
     repo: String,

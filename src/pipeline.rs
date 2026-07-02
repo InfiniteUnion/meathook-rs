@@ -107,7 +107,7 @@ where
 
         info!(pipeline = %name, "pipeline shutting down; draining sink stack");
         if let Err(error) = self.sink.flush().await {
-            error!(pipeline = %name, %error, "final flush failed; spooled data will replay on next start");
+            error!(pipeline = %name, %error, "final flush failed; durably stored data will replay on next start");
         }
     }
 

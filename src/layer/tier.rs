@@ -1,0 +1,481 @@
+//! [`Tier`]: one buffering layer, generic over its [`Store`] backend.
+//!
+//! A tier owns all the pipeline-side buffering logic exactly once —
+//! wall-clock window alignment, [`FlushPolicy`] firing, replay-on-startup,
+//! and retain-on-downstream-failure — and delegates the actual holding of
+//! records to a [`Store`]. `Tier` backed by [`MemStore`](crate::MemStore)
+//! is a volatile in-memory buffer; backed by
+//! [`JsonlStore`](crate::JsonlStore) it is a durable write-ahead spool.
+
+use std::error;
+use std::marker::PhantomData;
+
+use time::OffsetDateTime;
+use tracing::{debug, warn};
+
+use super::FlushPolicy;
+use crate::sink::{Sink, WindowMeta};
+use crate::store::{Segment as _, Store};
+
+/// Error from a [`Tier`] layer.
+#[derive(Debug, thiserror::Error)]
+pub enum TierError<St, S>
+where
+    St: error::Error + Send + Sync + 'static,
+    S: error::Error + Send + Sync + 'static,
+{
+    /// The tier's store failed to append, read, or remove a window.
+    #[error("store error: {0}")]
+    Store(#[source] St),
+    /// The wrapped sink rejected a drained window.
+    #[error("downstream sink error: {0}")]
+    Downstream(#[source] S),
+}
+
+/// Buffering tier over a pluggable [`Store`].
+///
+/// Records ingest into the wall-clock-aligned window
+/// `align(meta.end)` (aligned to the policy's `every`); when the policy
+/// fires, stored windows drain downstream oldest-first, each removed from
+/// the store only after the downstream sink accepted it — a transient
+/// outage of the terminal sink does not lose data held in this tier.
+///
+/// A window whose delivery keeps failing (for example a record the
+/// terminal sink deterministically rejects) does not stall the pipeline:
+/// each drain pass attempts every closed window oldest-first, retains the
+/// failed ones for the next pass, and surfaces the first error. Such a
+/// poisoned window is retried on every pass and retained in the store
+/// indefinitely — remove its segment by hand (for
+/// [`JsonlStore`](crate::JsonlStore), delete the window's `.jsonl` file)
+/// if it must be discarded.
+///
+/// The policy is checked on each `ingest` (collector ticks are frequent
+/// compared to flush windows, so no extra timer task is needed);
+/// [`flush`](Sink::flush) force-drains. Whatever a previous run left in the
+/// store is replayed downstream on the first `ingest` or `flush` call, with
+/// [`WindowMeta`] reconstructed from the window key alone — replayed
+/// windows land at the same storage path (idempotent).
+pub struct Tier<R, St, S> {
+    store: St,
+    policy: FlushPolicy,
+    inner: S,
+    pipeline: Option<String>,
+    initialized: bool,
+    active_window: Option<i64>,
+    active_count: usize,
+    _record: PhantomData<fn() -> R>,
+}
+
+impl<R, St, S> Tier<R, St, S> {
+    /// Create a tier holding records in `store` until `policy` fires.
+    #[must_use]
+    pub fn new(store: St, policy: FlushPolicy, inner: S) -> Self {
+        Self {
+            store,
+            policy,
+            inner,
+            pipeline: None,
+            initialized: false,
+            active_window: None,
+            active_count: 0,
+            _record: PhantomData,
+        }
+    }
+
+    /// Override the pipeline name used in drained [`WindowMeta`] (default:
+    /// the first live meta seen, then the store's
+    /// [`pipeline_hint`](Store::pipeline_hint)).
+    #[must_use]
+    pub fn with_pipeline_name(mut self, name: impl Into<String>) -> Self {
+        self.pipeline = Some(name.into());
+        self
+    }
+
+    /// Access the wrapped sink.
+    #[must_use]
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+
+    fn window_secs(&self) -> i64 {
+        i64::try_from(self.policy.every.as_secs())
+            .unwrap_or(i64::MAX)
+            .max(1)
+    }
+
+    fn align(&self, unix: i64) -> i64 {
+        unix - unix.rem_euclid(self.window_secs())
+    }
+}
+
+impl<R, St, S> Tier<R, St, S>
+where
+    R: Send + 'static,
+    St: Store<R>,
+    S: Sink<R>,
+{
+    fn pipeline_name(&self) -> String {
+        self.pipeline
+            .as_deref()
+            .or_else(|| self.store.pipeline_hint())
+            .unwrap_or("unknown")
+            .to_owned()
+    }
+
+    /// First-use crash recovery: drain whatever a previous run left in the
+    /// store. Failures are logged, not propagated — the windows stay in the
+    /// store to be retried at the next firing, and new records must still
+    /// be appended afterwards.
+    async fn ensure_init(&mut self) {
+        if self.initialized {
+            return;
+        }
+        self.initialized = true;
+        if let Err(error) = self.drain(true).await {
+            warn!(
+                pipeline = %self.pipeline_name(),
+                %error,
+                "startup replay failed; stored windows retained for retry"
+            );
+        }
+    }
+
+    /// Drain stored windows downstream, oldest first, removing each from
+    /// the store only after downstream success. A failed window —
+    /// unreadable, rejected downstream, or failing removal — is retained
+    /// for the next pass and does not block newer windows: the pass skips
+    /// past it, attempts the rest, and returns the first error at the end.
+    /// With `include_active == false`, the currently active window is
+    /// skipped, not drained.
+    async fn drain(&mut self, include_active: bool) -> Result<(), TierError<St::Error, S::Error>> {
+        // Hoisted so no `&self` method call overlaps the live segment
+        // borrow below.
+        let pipeline = self.pipeline_name();
+        let window_secs = self.window_secs();
+        // Windows at or below the cursor were skipped this pass (failed or
+        // still active); skipped segments drop uncommitted, so their
+        // records stay in the store.
+        let mut cursor = None;
+        let mut first_error = None;
+        loop {
+            let Some(mut seg) = self.store.oldest(cursor).await.map_err(TierError::Store)? else {
+                break;
+            };
+            let window = seg.window();
+            if !include_active && Some(window) == self.active_window {
+                // Still open: skip, but keep going — leftovers replayed
+                // from a previous run may be newer than the active window.
+                cursor = Some(window);
+                continue;
+            }
+            let records = match seg.records().await {
+                Ok(records) => records,
+                Err(error) => {
+                    warn!(
+                        pipeline = %pipeline,
+                        window,
+                        %error,
+                        "failed to read stored window; retained for retry"
+                    );
+                    first_error.get_or_insert(TierError::Store(error));
+                    cursor = Some(window);
+                    continue;
+                }
+            };
+            if !records.is_empty() {
+                let start = OffsetDateTime::from_unix_timestamp(window)
+                    .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+                let meta = WindowMeta {
+                    pipeline: pipeline.clone(),
+                    start,
+                    // `saturating_add`: a time-unbounded policy (e.g.
+                    // `every == Duration::MAX`) makes `window_secs` equal
+                    // `i64::MAX`; plain `+` panics on `time` range overflow.
+                    end: start.saturating_add(time::Duration::seconds(window_secs)),
+                };
+                debug!(
+                    pipeline = %pipeline,
+                    window,
+                    records = records.len(),
+                    "tier draining window downstream"
+                );
+                if let Err(error) = self.inner.ingest(&meta, records).await {
+                    warn!(
+                        pipeline = %pipeline,
+                        window,
+                        %error,
+                        "downstream rejected window; retained for retry"
+                    );
+                    first_error.get_or_insert(TierError::Downstream(error));
+                    cursor = Some(window);
+                    continue;
+                }
+            }
+            if let Err(error) = seg.commit().await {
+                warn!(
+                    pipeline = %pipeline,
+                    window,
+                    %error,
+                    "failed to remove drained window from store"
+                );
+                first_error.get_or_insert(TierError::Store(error));
+                cursor = Some(window);
+                continue;
+            }
+            if Some(window) == self.active_window {
+                self.active_window = None;
+                self.active_count = 0;
+            }
+        }
+        match first_error {
+            None => Ok(()),
+            Some(error) => Err(error),
+        }
+    }
+}
+
+impl<R, St, S> Sink<R> for Tier<R, St, S>
+where
+    R: Send + 'static,
+    St: Store<R>,
+    S: Sink<R>,
+{
+    type Error = TierError<St::Error, S::Error>;
+
+    async fn ingest(&mut self, meta: &WindowMeta, records: Vec<R>) -> Result<(), Self::Error> {
+        if self.pipeline.is_none() {
+            self.pipeline = Some(meta.pipeline.clone());
+        }
+        self.ensure_init().await;
+
+        if !records.is_empty() {
+            let window = self.align(meta.end.unix_timestamp());
+            let count = records.len();
+            self.store
+                .append(window, records)
+                .await
+                .map_err(TierError::Store)?;
+            if self.active_window != Some(window) {
+                self.active_window = Some(window);
+                self.active_count = 0;
+            }
+            self.active_count += count;
+        }
+
+        if self.active_count >= self.policy.max_records {
+            self.drain(true).await
+        } else {
+            self.drain(false).await
+        }
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        // flush IS the recovery drain, so skip ensure_init's error-swallowing
+        // variant: errors here must propagate (final flush on shutdown).
+        self.initialized = true;
+        self.drain(true).await?;
+        self.inner.flush().await.map_err(TierError::Downstream)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+    use crate::layer::SinkExt;
+    use crate::store::MemStore;
+    use crate::test_util::{SharedSink, TestSinkFailure, meta_at};
+
+    /// Rejects any batch containing `13` while armed; accepted batches
+    /// land in the wrapped [`SharedSink`].
+    struct PoisonSink {
+        inner: SharedSink<i32>,
+        armed: Arc<AtomicBool>,
+    }
+
+    impl Sink<i32> for PoisonSink {
+        type Error = TestSinkFailure;
+
+        async fn ingest(
+            &mut self,
+            meta: &WindowMeta,
+            records: Vec<i32>,
+        ) -> Result<(), TestSinkFailure> {
+            if self.armed.load(Ordering::SeqCst) && records.contains(&13) {
+                return Err(TestSinkFailure);
+            }
+            self.inner.ingest(meta, records).await
+        }
+
+        async fn flush(&mut self) -> Result<(), TestSinkFailure> {
+            self.inner.flush().await
+        }
+    }
+
+    #[tokio::test]
+    async fn mem_tier_holds_until_max_records() {
+        let inner = SharedSink::new();
+        let mut sink = inner.clone().tier(
+            MemStore::new(),
+            FlushPolicy::new(Duration::from_secs(3600), 3),
+        );
+
+        sink.ingest(&meta_at("p", 10), vec![1, 2]).await.unwrap();
+        assert!(inner.batches().is_empty());
+
+        sink.ingest(&meta_at("p", 20), vec![3]).await.unwrap();
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].1, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn time_unbounded_policy_drains_on_record_count() {
+        let inner = SharedSink::new();
+        let mut sink = inner
+            .clone()
+            .tier(MemStore::new(), FlushPolicy::new(Duration::MAX, 2));
+
+        // All records land in the single epoch-anchored window; only the
+        // record cap can fire. Draining must not panic computing the
+        // window's `end` (epoch + i64::MAX seconds overflows `time`).
+        sink.ingest(&meta_at("p", 10), vec![1]).await.unwrap();
+        assert!(inner.batches().is_empty());
+
+        sink.ingest(&meta_at("p", 20), vec![2]).await.unwrap();
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0.start.unix_timestamp(), 0);
+        // `end` saturates to `time`'s max representable datetime.
+        assert_eq!(
+            batches[0].0.end,
+            batches[0]
+                .0
+                .start
+                .saturating_add(time::Duration::seconds(i64::MAX))
+        );
+        assert_eq!(batches[0].1, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn mem_tier_drains_closed_window_on_next_ingest() {
+        let inner = SharedSink::new();
+        let mut sink = inner.clone().tier(
+            MemStore::new(),
+            FlushPolicy::every(Duration::from_secs(300)),
+        );
+
+        sink.ingest(&meta_at("p", 10), vec![1]).await.unwrap();
+        assert!(inner.batches().is_empty());
+
+        // The next tick lands in the following aligned window: the previous
+        // window is now closed and ships; the new record stays held.
+        sink.ingest(&meta_at("p", 310), vec![2]).await.unwrap();
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0.pipeline, "p");
+        assert_eq!(batches[0].0.start.unix_timestamp(), 0);
+        assert_eq!(batches[0].0.end.unix_timestamp(), 300);
+        assert_eq!(batches[0].1, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn mem_tier_retains_records_across_failing_downstream() {
+        let inner = SharedSink::new();
+        let mut sink = inner.clone().tier(
+            MemStore::new(),
+            FlushPolicy::new(Duration::from_secs(3600), 2),
+        );
+
+        inner.set_fail(true);
+        assert!(sink.ingest(&meta_at("p", 10), vec![1, 2]).await.is_err());
+        assert!(inner.batches().is_empty());
+
+        inner.set_fail(false);
+        sink.ingest(&meta_at("p", 20), vec![3]).await.unwrap();
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].1, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn flush_drains_the_whole_stack() {
+        let bottom = SharedSink::new();
+        let mut sink = bottom
+            .clone()
+            .tier(MemStore::new(), FlushPolicy::hourly())
+            .tier(MemStore::new(), FlushPolicy::hourly());
+
+        sink.ingest(&meta_at("p", 10), vec![1, 2, 3]).await.unwrap();
+        assert!(bottom.batches().is_empty());
+
+        sink.flush().await.unwrap();
+        assert_eq!(bottom.batches()[0].1, vec![1, 2, 3]);
+        assert!(bottom.flushed());
+    }
+
+    #[tokio::test]
+    async fn poison_window_does_not_block_newer_windows() {
+        let inner = SharedSink::new();
+        let armed = Arc::new(AtomicBool::new(true));
+        let mut sink = PoisonSink {
+            inner: inner.clone(),
+            armed: Arc::clone(&armed),
+        }
+        .tier(
+            MemStore::new(),
+            FlushPolicy::every(Duration::from_secs(300)),
+        );
+
+        // Window 0 gets the poison record; it closes on the next tick.
+        sink.ingest(&meta_at("p", 10), vec![13]).await.unwrap();
+        assert!(sink.ingest(&meta_at("p", 310), vec![2]).await.is_err());
+        assert!(inner.batches().is_empty());
+
+        // Next tick: window 0 still fails, but the now-closed window 300
+        // drains past it. The first error still surfaces.
+        assert!(sink.ingest(&meta_at("p", 610), vec![3]).await.is_err());
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0.start.unix_timestamp(), 300);
+        assert_eq!(batches[0].1, vec![2]);
+
+        // The poison window was retained, not dropped: once the sink
+        // accepts it, it ships before newer held windows.
+        armed.store(false, Ordering::SeqCst);
+        sink.flush().await.unwrap();
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[1].0.start.unix_timestamp(), 0);
+        assert_eq!(batches[1].1, vec![13]);
+        assert_eq!(batches[2].0.start.unix_timestamp(), 600);
+        assert_eq!(batches[2].1, vec![3]);
+    }
+
+    #[tokio::test]
+    async fn outage_retains_all_windows_and_recovers_in_order() {
+        let inner = SharedSink::new();
+        let mut sink = inner.clone().tier(
+            MemStore::new(),
+            FlushPolicy::every(Duration::from_secs(300)),
+        );
+
+        sink.ingest(&meta_at("p", 10), vec![1]).await.unwrap();
+        inner.set_fail(true);
+        assert!(sink.ingest(&meta_at("p", 310), vec![2]).await.is_err());
+        assert!(sink.ingest(&meta_at("p", 610), vec![3]).await.is_err());
+        assert!(inner.batches().is_empty());
+
+        inner.set_fail(false);
+        sink.flush().await.unwrap();
+        let starts = inner
+            .batches()
+            .iter()
+            .map(|(meta, records)| (meta.start.unix_timestamp(), records.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(starts, vec![(0, vec![1]), (300, vec![2]), (600, vec![3])]);
+    }
+}

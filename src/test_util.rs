@@ -95,3 +95,15 @@ pub fn meta(pipeline: &str) -> WindowMeta {
         end: now,
     }
 }
+
+/// A `WindowMeta` whose start/end are the given unix timestamp — lets tests
+/// steer a tier's window alignment deterministically.
+#[must_use]
+pub fn meta_at(pipeline: &str, unix: i64) -> WindowMeta {
+    let t = OffsetDateTime::from_unix_timestamp(unix).unwrap();
+    WindowMeta {
+        pipeline: pipeline.to_owned(),
+        start: t,
+        end: t,
+    }
+}

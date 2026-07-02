@@ -1,22 +1,18 @@
 //! Sink combinators: the tower-layer part of meathook.
 //!
-//! Flush tiers stack: `Buffered(mem) → DiskSpool → HfSink`, each tier with
-//! its own [`FlushPolicy`]. Each layer owns its records until *its* policy
-//! fires, then pushes downstream.
+//! Flush tiers stack: `Tier(MemStore) → Tier(JsonlStore) → HfSink`, each
+//! tier with its own [`FlushPolicy`] and [`Store`] backend. Each tier owns
+//! its records until *its* policy fires, then pushes downstream.
 
 use std::error;
-use std::path;
 use std::time::Duration;
 
-use ::time::OffsetDateTime;
-use tokio::time::Instant;
-use tracing::debug;
-
 use crate::sink::{Sink, WindowMeta};
+use crate::store::Store;
 
-mod disk;
+mod tier;
 
-pub use disk::{DiskSpool, SpoolError};
+pub use tier::{Tier, TierError};
 
 /// When a buffering layer pushes its held records downstream.
 ///
@@ -25,6 +21,12 @@ pub use disk::{DiskSpool, SpoolError};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlushPolicy {
     /// Maximum age of a window before it is flushed downstream.
+    ///
+    /// An `every` beyond `time`'s representable range (e.g.
+    /// [`Duration::MAX`]) never fires on age: records land in a single
+    /// epoch-anchored window, only `max_records` (or an explicit flush)
+    /// drains it, and the drained window's `end` saturates rather than
+    /// overflowing.
     pub every: Duration,
     /// Maximum records held before flushing early (a safety valve; size it
     /// well above one window's worth of records).
@@ -53,23 +55,18 @@ impl FlushPolicy {
 /// Builder-style composition for sinks, mirroring tower's `ServiceBuilder`.
 ///
 /// ```ignore
-/// let sink = hf_sink.spooled("/var/lib/meathook/spool/pm25", FlushPolicy::hourly());
+/// let sink = hf_sink.tier(JsonlStore::new("/var/lib/meathook/spool/pm25"), FlushPolicy::hourly());
 /// ```
 pub trait SinkExt<R>: Sink<R> + Sized {
-    /// Wrap `self` in an in-memory buffering tier.
-    #[must_use]
-    fn buffered(self, policy: FlushPolicy) -> Buffered<R, Self> {
-        Buffered::new(policy, self)
-    }
-
-    /// Wrap `self` in a durable write-ahead spool rooted at `dir`.
+    /// Wrap `self` in a buffering tier backed by `store`.
     ///
-    /// The pipeline name recorded in replayed [`WindowMeta`] is derived from
-    /// the last component of `dir`, so point each pipeline at
-    /// `spool_root.join(pipeline_name)`.
+    /// The store decides durability: [`MemStore`](crate::MemStore) holds
+    /// records in memory, [`JsonlStore`](crate::JsonlStore) is a durable
+    /// write-ahead spool. Tiers nest to taste — zero tiers is fine too, a
+    /// terminal sink works on its own.
     #[must_use]
-    fn spooled(self, dir: impl Into<path::PathBuf>, policy: FlushPolicy) -> DiskSpool<R, Self> {
-        DiskSpool::new(dir, policy, self)
+    fn tier<St: Store<R>>(self, store: St, policy: FlushPolicy) -> Tier<R, St, Self> {
+        Tier::new(store, policy, self)
     }
 
     /// Fan out: every batch is ingested into both `self` and `other`.
@@ -80,110 +77,6 @@ pub trait SinkExt<R>: Sink<R> + Sized {
 }
 
 impl<R, S: Sink<R>> SinkExt<R> for S {}
-
-/// In-memory buffering tier: holds records and pushes them downstream when
-/// its [`FlushPolicy`] fires.
-///
-/// The policy is checked on each `ingest` (collector ticks are frequent
-/// compared to flush windows, so no extra timer task is needed);
-/// [`flush`](Sink::flush) force-drains. On downstream failure the records
-/// are **kept** and retried at the next firing — a transient outage of the
-/// terminal sink does not lose data held in this tier.
-///
-/// Requires `R: Clone` so retained records survive a failed downstream
-/// ingest.
-pub struct Buffered<R, S> {
-    buf: Vec<R>,
-    window: Option<Window>,
-    policy: FlushPolicy,
-    inner: S,
-}
-
-#[derive(Debug, Clone)]
-struct Window {
-    pipeline: String,
-    start: OffsetDateTime,
-    opened_at: Instant,
-}
-
-impl<R, S> Buffered<R, S> {
-    #[must_use]
-    pub fn new(policy: FlushPolicy, inner: S) -> Self {
-        Self {
-            buf: vec![],
-            window: None,
-            policy,
-            inner,
-        }
-    }
-
-    /// Access the wrapped sink.
-    #[must_use]
-    pub fn inner(&self) -> &S {
-        &self.inner
-    }
-}
-
-impl<R, S> Buffered<R, S>
-where
-    R: Clone + Send + 'static,
-    S: Sink<R>,
-{
-    async fn drain(&mut self) -> Result<(), S::Error> {
-        let Some(window) = &self.window else {
-            return Ok(());
-        };
-        let meta = WindowMeta {
-            pipeline: window.pipeline.clone(),
-            start: window.start,
-            end: OffsetDateTime::now_utc(),
-        };
-        debug!(
-            pipeline = %meta.pipeline,
-            records = self.buf.len(),
-            "buffered tier draining downstream"
-        );
-        self.inner.ingest(&meta, self.buf.clone()).await?;
-        self.buf.clear();
-        self.window = None;
-        Ok(())
-    }
-
-    fn should_fire(&self) -> bool {
-        let Some(window) = &self.window else {
-            return false;
-        };
-        self.buf.len() >= self.policy.max_records || window.opened_at.elapsed() >= self.policy.every
-    }
-}
-
-impl<R, S> Sink<R> for Buffered<R, S>
-where
-    R: Clone + Send + 'static,
-    S: Sink<R>,
-{
-    type Error = S::Error;
-
-    async fn ingest(&mut self, meta: &WindowMeta, records: Vec<R>) -> Result<(), Self::Error> {
-        if self.window.is_none() {
-            self.window = Some(Window {
-                pipeline: meta.pipeline.clone(),
-                start: meta.start,
-                opened_at: Instant::now(),
-            });
-        }
-        self.buf.extend(records);
-        if self.should_fire() {
-            self.drain().await?;
-        }
-        Ok(())
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.drain().await?;
-        self.inner.flush().await
-    }
-}
 
 /// Fan-out combinator: ingests every batch into both sinks.
 ///
@@ -247,59 +140,6 @@ where
 mod tests {
     use super::*;
     use crate::test_util::{SharedSink, meta};
-    use tokio::time;
-
-    #[tokio::test]
-    async fn buffered_holds_until_max_records() {
-        let inner = SharedSink::new();
-        let mut sink = inner
-            .clone()
-            .buffered(FlushPolicy::new(Duration::from_secs(3600), 3));
-
-        sink.ingest(&meta("p"), vec![1, 2]).await.unwrap();
-        assert!(inner.batches().is_empty());
-
-        sink.ingest(&meta("p"), vec![3]).await.unwrap();
-        let batches = inner.batches();
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].1, vec![1, 2, 3]);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn buffered_fires_on_elapsed_window() {
-        let inner = SharedSink::new();
-        let mut sink = inner
-            .clone()
-            .buffered(FlushPolicy::every(Duration::from_secs(300)));
-
-        sink.ingest(&meta("p"), vec![1]).await.unwrap();
-        assert!(inner.batches().is_empty());
-
-        time::advance(Duration::from_secs(301)).await;
-        sink.ingest(&meta("p"), vec![2]).await.unwrap();
-
-        let batches = inner.batches();
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].1, vec![1, 2]);
-    }
-
-    #[tokio::test]
-    async fn buffered_retains_records_across_failing_downstream() {
-        let inner = SharedSink::new();
-        let mut sink = inner
-            .clone()
-            .buffered(FlushPolicy::new(Duration::from_secs(3600), 2));
-
-        inner.set_fail(true);
-        assert!(sink.ingest(&meta("p"), vec![1, 2]).await.is_err());
-        assert!(inner.batches().is_empty());
-
-        inner.set_fail(false);
-        sink.ingest(&meta("p"), vec![3]).await.unwrap();
-        let batches = inner.batches();
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].1, vec![1, 2, 3]);
-    }
 
     #[tokio::test]
     async fn tee_fans_out_to_both_branches() {
@@ -322,21 +162,5 @@ mod tests {
         let err = sink.ingest(&meta("p"), vec![1]).await.unwrap_err();
         assert!(matches!(err, TeeError::First(_)));
         assert_eq!(b.batches().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn flush_drains_the_whole_stack() {
-        let bottom = SharedSink::new();
-        let mut sink = bottom
-            .clone()
-            .buffered(FlushPolicy::hourly())
-            .buffered(FlushPolicy::hourly());
-
-        sink.ingest(&meta("p"), vec![1, 2, 3]).await.unwrap();
-        assert!(bottom.batches().is_empty());
-
-        sink.flush().await.unwrap();
-        assert_eq!(bottom.batches()[0].1, vec![1, 2, 3]);
-        assert!(bottom.flushed());
     }
 }

@@ -38,9 +38,9 @@ tick(interval) ──► Collector::collect() ──► Vec<Record> ──► Si
                                                                  │
                               the "sink" is a composed stack of layers, e.g.:
                                                                  │
-                          Buffered(mem, flush: 5m | 10k records) │  tier 1
-                                       DiskSpool(flush: 1h)      │  tier 2
-                                  HfSink(parquet encode+commit)  ▼  terminal
+               Tier(MemStore, flush: 5m | 10k records) │  tier 1 (any number of
+                        Tier(JsonlStore, flush: 1h)    │  tier 2  tiers, or none)
+                     HfSink(parquet encode+commit)     ▼  terminal
 ```
 
 - **[`Collector`]** produces a batch of row-shaped records per tick.
@@ -48,7 +48,10 @@ tick(interval) ──► Collector::collect() ──► Vec<Record> ──► Si
   [nea-rs](https://github.com/InfiniteUnion/nea-rs)) into a collector.
 - **[`Sink`]** receives records. Each layer owns its records until *its*
   [`FlushPolicy`] fires (interval elapsed / max records / explicit `flush()`),
-  then pushes downstream. Fan-out is just another combinator (`Tee`).
+  then pushes downstream. Buffering is one generic layer, [`Tier`], over a
+  pluggable [`Store`] backend — in-memory `MemStore`, write-ahead
+  `JsonlStore`, or bring your own (SQLite, object storage, ...). Fan-out is
+  just another combinator (`Tee`).
 - **[`Meathook`]** runs one tokio task per pipeline, respawns panicked
   pipelines from their factory with exponential backoff, and drains every
   sink stack on SIGTERM/ctrl-c before exiting.
@@ -61,7 +64,7 @@ Errors are concrete `thiserror` enums end to end — traits carry an associated
 ```rust,no_run
 use std::time::Duration;
 
-use meathook::{FlushPolicy, HfSink, Meathook, Pipeline, SatayCollector, SinkExt as _};
+use meathook::{FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector, SinkExt as _};
 use satay_reqwest::ReqwestActionExt as _;
 
 #[tokio::main]
@@ -87,7 +90,10 @@ async fn main() -> Result<(), meathook::runtime::RuntimeError> {
             // Durable stack: every tick is fsynced to disk before ingest
             // returns; hourly windows land on HF as parquet.
             let sink = HfSink::new(client.clone(), "you/your-dataset", token.clone())
-                .spooled("/var/lib/meathook/spool/air_temperature", FlushPolicy::hourly());
+                .tier(
+                    JsonlStore::new("/var/lib/meathook/spool/air_temperature"),
+                    FlushPolicy::hourly(),
+                );
 
             Pipeline::new(collector, sink, Duration::from_secs(60))
                 // "latest reading" APIs repeat across polls; dedupe by key
@@ -107,11 +113,11 @@ reference consumer: three NEA pipelines, TOML config, graceful shutdown.
 
 ## Durability
 
-`DiskSpool` is a write-ahead spool: `ingest` appends records as JSON lines to
-an fsynced segment file *before returning*, and segments are deleted only
-after the downstream sink accepted them. Storage paths are deterministic per
-window (`data/{pipeline}/{YYYY-MM-DD}/{HH}.parquet`), so replays are
-idempotent.
+A `Tier` backed by `JsonlStore` is a write-ahead spool: `ingest` appends
+records as JSON lines to an fsynced segment file *before returning*, and
+segments are deleted only after the downstream sink accepted them. Storage
+paths are deterministic per window
+(`data/{pipeline}/{YYYY-MM-DD}/{HH}.parquet`), so replays are idempotent.
 
 | Failure | What happens | Data lost |
 |---|---|---|
@@ -129,9 +135,8 @@ base64-inlined file), sent through `satay_reqwest` — the same transport path
 as the collectors. The Hive-style partitioning keeps the HF dataset viewer
 happy.
 
-Retry/backoff is deliberately *not* in the sink: the upstream `DiskSpool` or
-`Buffered` tier retains records when the sink errors and retries at its next
-firing.
+Retry/backoff is deliberately *not* in the sink: an upstream `Tier` retains
+records when the sink errors and retries at its next firing.
 
 ## Feature flags
 
@@ -154,7 +159,7 @@ small TOML file ([`examples/meathook.toml`](examples/meathook.toml)):
 ```toml
 spool_dir = "/var/lib/meathook/spool"   # PVC mount on k8s
 
-[flush]                  # FlushPolicy for each pipeline's DiskSpool tier
+[flush]                  # FlushPolicy for each pipeline's spool tier
 every = "1h"
 max_records = 50_000
 
@@ -202,6 +207,8 @@ at your option.
 [`Sink`]: https://docs.rs/meathook-rs/latest/meathook/sink/trait.Sink.html
 [`SatayCollector`]: https://docs.rs/meathook-rs/latest/meathook/satay/struct.SatayCollector.html
 [`FlushPolicy`]: https://docs.rs/meathook-rs/latest/meathook/layer/struct.FlushPolicy.html
+[`Tier`]: https://docs.rs/meathook-rs/latest/meathook/layer/struct.Tier.html
+[`Store`]: https://docs.rs/meathook-rs/latest/meathook/store/trait.Store.html
 [`Meathook`]: https://docs.rs/meathook-rs/latest/meathook/runtime/struct.Meathook.html
 
 
