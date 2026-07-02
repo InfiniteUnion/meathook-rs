@@ -51,4 +51,4 @@ pub use store::{JsonlStore, JsonlStoreError, MemStore, Segment, Store};
 #[cfg(feature = "parquet")]
 pub use encode::EncodeError;
 #[cfg(feature = "huggingface")]
-pub use sink::huggingface::{HfSink, HfSinkError};
+pub use sink::huggingface::{CommitGate, HfSink, HfSinkError};

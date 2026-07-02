@@ -16,7 +16,8 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use meathook::{
-    FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector, SinkExt as _, Tier,
+    CommitGate, FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector, SinkExt as _,
+    Tier,
 };
 use nea_rs::{
     AirTemperatureOperationResponse, NeaReadingSnapshot, NeaWeatherStation, Pm25OperationResponse,
@@ -131,6 +132,9 @@ struct Ctx {
     token: String,
     spool_dir: PathBuf,
     policy: FlushPolicy,
+    /// Shared by every pipeline's sink: commits to the one HF repo go out
+    /// one at a time instead of racing into HF's per-repo commit queue.
+    gate: CommitGate,
 }
 
 impl Ctx {
@@ -149,6 +153,7 @@ impl Ctx {
     {
         HfSink::new(self.client.clone(), self.repo.clone(), self.token.clone())
             .branch(self.branch.clone())
+            .gate(self.gate.clone())
             .tier(JsonlStore::new(self.spool_dir.join(pipeline)), self.policy)
     }
 }
@@ -179,6 +184,7 @@ fn ctx_from_config(config: &Config) -> anyhow::Result<Ctx> {
         token: std::env::var("HF_TOKEN").context("HF_TOKEN must be set")?,
         spool_dir: config.spool_dir.clone(),
         policy: FlushPolicy::new(config.flush.every, config.flush.max_records),
+        gate: CommitGate::new(),
     })
 }
 

@@ -117,7 +117,7 @@ A `Tier` backed by `JsonlStore` is a write-ahead spool: `ingest` appends
 records as JSON lines to an fsynced segment file *before returning*, and
 segments are deleted only after the downstream sink accepted them. Storage
 paths are deterministic per window
-(`data/{pipeline}/{YYYY-MM-DD}/{HH}.parquet`), so replays are idempotent.
+(`data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet`), so replays are idempotent.
 
 | Failure | What happens | Data lost |
 |---|---|---|
@@ -135,8 +135,12 @@ base64-inlined file), sent through `satay_reqwest` — the same transport path
 as the collectors. The Hive-style partitioning keeps the HF dataset viewer
 happy.
 
-Retry/backoff is deliberately *not* in the sink: an upstream `Tier` retains
-records when the sink errors and retries at its next firing.
+Transient failures (transport errors, 429, 5xx) retry a few times in-sink
+with backoff; beyond that, an upstream `Tier` retains the records and
+retries at its next firing. Pipelines committing to the same repo should
+share a `CommitGate` (`HfSink::gate`) so concurrent flushes — e.g. every
+pipeline's final window on shutdown — queue client-side instead of piling
+into HF's per-repo commit concurrency queue.
 
 ## Feature flags
 
