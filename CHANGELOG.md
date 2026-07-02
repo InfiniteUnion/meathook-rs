@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alignment, `FlushPolicy` firing, replay-on-startup, and
   retain-on-downstream-failure; compose with `SinkExt::tier(store, policy)`.
   Tiers nest arbitrarily, and zero tiers (a terminal sink alone) is fine.
+- `CommitGate`: client-side commit serialization for `HfSink`
+  (`HfSink::gate`). HuggingFace serializes commits per repo in a
+  server-side concurrency queue that 429s requests queued too long, so
+  pipelines committing to the same repo (e.g. the shutdown flush racing
+  every pipeline's final window) share one gate and queue client-side.
+- `HfSink` retries transient commit failures (transport errors, 429, 5xx)
+  up to 3 times with 2s/4s/8s backoff before the error propagates —
+  previously the one-shot shutdown flush had no retry at all. `Tier`
+  retention/replay remains the durable fallback.
 
 ### Removed
 
@@ -43,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live batches through a `JsonlStore` tier carry the first-seen
   `meta.pipeline` instead of always the directory-derived name (replay
   before any live batch still uses the store's hint).
+- **Breaking:** `HfSink` object paths are keyed by the full window start
+  (`data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet`, was `{HH}.parquet`).
+  With sub-hourly `FlushPolicy::every`, every window in an hour used to
+  overwrite the same file — after the spool segment was already deleted —
+  silently losing all but the hour's last window.
 
 ### Fixed
 

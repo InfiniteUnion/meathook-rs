@@ -10,6 +10,8 @@
 //! in is a drop-in change behind the `Action` boundary.
 
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -18,7 +20,9 @@ use satay_reqwest::ReqwestActionExt;
 use satay_runtime::{Action, RequestParts, ResponseParts, insert_header, into_request};
 use serde::de;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tokio::sync::Semaphore;
+use tokio::time::sleep;
+use tracing::{info, warn};
 
 use crate::encode::{self, EncodeError};
 use crate::sink::{Sink, WindowMeta};
@@ -46,7 +50,7 @@ pub struct CommitAction {
     pub branch: String,
     pub token: String,
     pub summary: String,
-    /// Path of the file inside the repo, e.g. `data/pm25/2026-06-12/08.parquet`.
+    /// Path of the file inside the repo, e.g. `data/pm25/2026-06-12/08-00.parquet`.
     pub path_in_repo: String,
     pub content: Vec<u8>,
 }
@@ -142,19 +146,61 @@ impl Action for CommitAction {
     }
 }
 
+/// Client-side commit serialization: at most one in-flight commit per gate.
+///
+/// `HuggingFace` serializes commits to a repo in a server-side concurrency
+/// queue and rejects requests that queue too long (`429 "maximum time in
+/// concurrency queue reached"`), so sinks committing to the same repo —
+/// e.g. one [`HfSink`] per pipeline — should share one clone of the same
+/// gate and queue client-side instead. Waiters acquire in FIFO order.
+#[derive(Debug, Clone)]
+pub struct CommitGate(Arc<Semaphore>);
+
+impl CommitGate {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Arc::new(Semaphore::new(1)))
+    }
+}
+
+impl Default for CommitGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Total send attempts per window commit (1 initial + 3 retries; backoff
+/// between attempts is 2s, 4s, 8s).
+const COMMIT_ATTEMPTS: u32 = 4;
+
+/// Whether a failed commit is worth retrying in-sink: transport flakes and
+/// contention/server-side statuses. Other rejections (auth, bad request)
+/// and encode failures propagate immediately.
+fn transient(error: &HfSinkError) -> bool {
+    match error {
+        HfSinkError::Transport(_) => true,
+        HfSinkError::Rejected { status, .. } => {
+            *status == http::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+        }
+        HfSinkError::Encode(_) => false,
+    }
+}
+
 /// Terminal sink: encodes each ingested window to parquet and commits it to
 /// a `HuggingFace` dataset repo at a deterministic, Hive-style path:
 ///
 /// ```text
-/// data/{pipeline}/{YYYY-MM-DD}/{HH}.parquet
+/// data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet
 /// ```
 ///
 /// The path depends only on the window start, so replaying a window (crash
 /// after upload but before the spool segment was deleted) overwrites the
 /// same file with the same content — replays are idempotent.
 ///
-/// Retry/backoff is *not* handled here: an upstream [`Tier`] retains
-/// records when this sink errors and retries at its next firing.
+/// Transient failures ([`transient`]: transport errors, 429, 5xx) retry a
+/// few times in-sink with backoff before the error propagates; an upstream
+/// [`Tier`] retains records when this sink errors and retries at its next
+/// firing (or replays them on the next start).
 ///
 /// [`Tier`]: crate::Tier
 pub struct HfSink<R> {
@@ -162,6 +208,7 @@ pub struct HfSink<R> {
     repo: String,
     branch: String,
     token: String,
+    gate: Option<CommitGate>,
     _record: PhantomData<fn(R)>,
 }
 
@@ -176,6 +223,7 @@ impl<R> HfSink<R> {
             repo: repo.into(),
             branch: "main".to_owned(),
             token: token.into(),
+            gate: None,
             _record: PhantomData,
         }
     }
@@ -185,17 +233,43 @@ impl<R> HfSink<R> {
         self.branch = branch.into();
         self
     }
+
+    /// Serialize commits through `gate`; share one clone across every sink
+    /// targeting the same repo.
+    #[must_use]
+    pub fn gate(mut self, gate: CommitGate) -> Self {
+        self.gate = Some(gate);
+        self
+    }
+
+    /// One gated send attempt, with a rejection mapped into a typed error.
+    async fn commit(&self, action: CommitAction) -> Result<CommitResponse, HfSinkError> {
+        // The gate's semaphore is never closed, so acquire cannot fail;
+        // falling back to an ungated send keeps that invariant harmless.
+        let _permit = match &self.gate {
+            Some(gate) => gate.0.acquire().await.ok(),
+            None => None,
+        };
+        match action.send_with(&self.client).await? {
+            CommitOutcome::Committed(commit) => Ok(commit),
+            CommitOutcome::Rejected { status, body } => Err(HfSinkError::Rejected { status, body }),
+        }
+    }
 }
 
+/// Keyed by the full window start down to the minute: sub-hourly windows
+/// (`FlushPolicy::every` < 1h) land in distinct files instead of
+/// overwriting the same `{HH}.parquet` within an hour.
 fn object_path(meta: &WindowMeta) -> String {
     let date = meta.start.date();
     format!(
-        "data/{}/{:04}-{:02}-{:02}/{:02}.parquet",
+        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}.parquet",
         meta.pipeline,
         date.year(),
         u8::from(date.month()),
         date.day(),
         meta.start.hour(),
+        meta.start.minute(),
     )
 }
 
@@ -223,19 +297,33 @@ where
             content,
         };
 
-        match action.send_with(&self.client).await? {
-            CommitOutcome::Committed(commit) => {
-                info!(
-                    pipeline = %meta.pipeline,
-                    path = %path_in_repo,
-                    records = records.len(),
-                    commit = commit.commit_oid.as_deref().unwrap_or("?"),
-                    "committed window to hugging face"
-                );
-                Ok(())
+        let mut attempt = 1;
+        let commit = loop {
+            match self.commit(action.clone()).await {
+                Ok(commit) => break commit,
+                Err(error) if attempt < COMMIT_ATTEMPTS && transient(&error) => {
+                    let backoff = Duration::from_secs(1 << attempt);
+                    warn!(
+                        pipeline = %meta.pipeline,
+                        %error,
+                        attempt,
+                        ?backoff,
+                        "hugging face commit failed; retrying"
+                    );
+                    sleep(backoff).await;
+                    attempt += 1;
+                }
+                Err(error) => return Err(error),
             }
-            CommitOutcome::Rejected { status, body } => Err(HfSinkError::Rejected { status, body }),
-        }
+        };
+        info!(
+            pipeline = %meta.pipeline,
+            path = %path_in_repo,
+            records = records.len(),
+            commit = commit.commit_oid.as_deref().unwrap_or("?"),
+            "committed window to hugging face"
+        );
+        Ok(())
     }
 
     /// No-op: this terminal sink ships every batch as it is ingested.
@@ -255,7 +343,7 @@ mod tests {
             branch: "main".into(),
             token: "hf_secret".into(),
             summary: "meathook: pm25 window".into(),
-            path_in_repo: "data/pm25/2026-06-12/08.parquet".into(),
+            path_in_repo: "data/pm25/2026-06-12/08-00.parquet".into(),
             content: b"PARQUET".to_vec(),
         }
     }
@@ -288,7 +376,7 @@ mod tests {
 
         let file: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(file["key"], "file");
-        assert_eq!(file["value"]["path"], "data/pm25/2026-06-12/08.parquet");
+        assert_eq!(file["value"]["path"], "data/pm25/2026-06-12/08-00.parquet");
         assert_eq!(file["value"]["encoding"], "base64");
         let decoded = BASE64
             .decode(file["value"]["content"].as_str().unwrap())
@@ -335,7 +423,32 @@ mod tests {
         };
         assert_eq!(
             object_path(&meta),
-            "data/air_temperature/2026-06-12/08.parquet"
+            "data/air_temperature/2026-06-12/08-00.parquet"
         );
+    }
+
+    #[test]
+    fn object_path_keeps_sub_hourly_windows_distinct() {
+        let meta = WindowMeta {
+            pipeline: "pm25".into(),
+            start: datetime!(2026-07-02 13:20 UTC),
+            end: datetime!(2026-07-02 13:30 UTC),
+        };
+        assert_eq!(object_path(&meta), "data/pm25/2026-07-02/13-20.parquet");
+    }
+
+    #[test]
+    fn transient_classifies_retryable_failures() {
+        let rejected = |status: http::StatusCode| HfSinkError::Rejected {
+            status,
+            body: String::new(),
+        };
+        assert!(transient(&rejected(http::StatusCode::TOO_MANY_REQUESTS)));
+        assert!(transient(&rejected(
+            http::StatusCode::INTERNAL_SERVER_ERROR
+        )));
+        assert!(transient(&rejected(http::StatusCode::SERVICE_UNAVAILABLE)));
+        assert!(!transient(&rejected(http::StatusCode::UNAUTHORIZED)));
+        assert!(!transient(&rejected(http::StatusCode::BAD_REQUEST)));
     }
 }
