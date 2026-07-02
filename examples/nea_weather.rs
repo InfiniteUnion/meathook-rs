@@ -1,10 +1,10 @@
 //! Reference meathook consumer: collects NEA (data.gov.sg) realtime weather
 //! readings and ships hourly parquet windows to a `HuggingFace` dataset repo.
 //!
-//! Each pipeline's stack is `DiskSpool → HfSink`: every tick is appended to
-//! an fsynced JSONL segment before the ingest returns (write-ahead), and the
-//! spool flushes a parquet file per window to HF. Leftover segments from a
-//! crash replay on the next start.
+//! Each pipeline's stack is `Tier(JsonlStore) → HfSink`: every tick is
+//! appended to an fsynced JSONL segment before the ingest returns
+//! (write-ahead), and the tier flushes a parquet file per window to HF.
+//! Leftover segments from a crash replay on the next start.
 //!
 //! ```bash
 //! HF_TOKEN=hf_... cargo run --example nea_weather -- examples/meathook.toml
@@ -15,7 +15,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use meathook::{DiskSpool, FlushPolicy, HfSink, Meathook, Pipeline, SatayCollector, SinkExt as _};
+use meathook::{
+    FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector, SinkExt as _, Tier,
+};
 use nea_rs::{
     AirTemperatureOperationResponse, NeaReadingSnapshot, NeaWeatherStation, Pm25OperationResponse,
     RainfallOperationResponse,
@@ -140,14 +142,14 @@ impl Ctx {
         }
     }
 
-    /// Terminal HF sink behind a per-pipeline durable spool.
-    fn spooled_hf<R>(&self, pipeline: &str) -> DiskSpool<R, HfSink<R>>
+    /// Terminal HF sink behind a per-pipeline durable spool tier.
+    fn tiered_hf<R>(&self, pipeline: &str) -> Tier<R, JsonlStore<R>, HfSink<R>>
     where
         R: Serialize + DeserializeOwned + Send + 'static,
     {
         HfSink::new(self.client.clone(), self.repo.clone(), self.token.clone())
             .branch(self.branch.clone())
-            .spooled(self.spool_dir.join(pipeline), self.policy)
+            .tier(JsonlStore::new(self.spool_dir.join(pipeline)), self.policy)
     }
 }
 
@@ -258,7 +260,7 @@ async fn main() -> anyhow::Result<()> {
                 },
                 flatten_air_temperature,
             );
-            Pipeline::new(collector, ctx.spooled_hf("air_temperature"), interval)
+            Pipeline::new(collector, ctx.tiered_hf("air_temperature"), interval)
                 .with_key_fn(|r: &StationReading| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
@@ -277,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
                 },
                 flatten_rainfall,
             );
-            Pipeline::new(collector, ctx.spooled_hf("rainfall"), interval)
+            Pipeline::new(collector, ctx.tiered_hf("rainfall"), interval)
                 .with_key_fn(|r: &StationReading| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
@@ -296,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
                 },
                 flatten_pm25,
             );
-            Pipeline::new(collector, ctx.spooled_hf("pm25"), interval)
+            Pipeline::new(collector, ctx.tiered_hf("pm25"), interval)
                 .with_key_fn(|r: &RegionReading| (r.region.clone(), r.timestamp.clone()))
         }
     };

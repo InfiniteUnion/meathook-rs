@@ -5,12 +5,12 @@
 
 spool_dir = "./spool-test" # PVC mount on k8s
 
-[flush] # FlushPolicy for each pipeline's DiskSpool tier
+[flush] # FlushPolicy for each pipeline's spool tier
 every = "10m"
 max_records = 50_000
 
 [sink.huggingface]
-repo = "zeon256/nea-weather-test2"
+repo = "zeon256/meathook-test2"
 branch = "main"
 
 [collectors.air_temperature]
