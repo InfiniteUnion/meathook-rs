@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server-side concurrency queue that 429s requests queued too long, so
   pipelines committing to the same repo (e.g. the shutdown flush racing
   every pipeline's final window) share one gate and queue client-side.
+  Give gated clients a request timeout (`reqwest::ClientBuilder::timeout`):
+  the permit is held for one send attempt, so a stalled upload otherwise
+  blocks every sink sharing the gate.
 - `HfSink` retries transient commit failures (transport errors, 429, 5xx)
   up to 3 times with 2s/4s/8s backoff before the error propagates —
   previously the one-shot shutdown flush had no retry at all. `Tier`
@@ -53,10 +56,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `meta.pipeline` instead of always the directory-derived name (replay
   before any live batch still uses the store's hint).
 - **Breaking:** `HfSink` object paths are keyed by the full window start
-  (`data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet`, was `{HH}.parquet`).
-  With sub-hourly `FlushPolicy::every`, every window in an hour used to
-  overwrite the same file — after the spool segment was already deleted —
-  silently losing all but the hour's last window.
+  and a fingerprint of the parquet bytes
+  (`data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{fnv1a64}.parquet`, was
+  `{HH}.parquet`). Two silent-overwrite modes existed — after the spool
+  segment was already deleted, so the records were unrecoverable:
+  sub-hourly `FlushPolicy::every` mapped every window in an hour to the
+  same file, and a window drained more than once (the `max_records` valve
+  firing mid-window, or a failed drain retried after the window grew)
+  overwrote its earlier chunk. Replays still re-encode to identical bytes
+  and overwrite their own file (idempotent); the fingerprint is stable for
+  identical bytes, though a parquet dependency upgrade between crash and
+  replay may re-ship a window to a new path, duplicating rather than
+  losing it. Migration: files under the old naming are left in place —
+  they remain valid data but read as duplicates to consumers globbing
+  `data/**/*.parquet` once their windows are ever replayed; delete them
+  if that matters.
 
 ### Fixed
 

@@ -12,14 +12,14 @@
 //! The two core abstractions are:
 //!
 //! - [`Collector`]: produces a batch of records per tick. With the `satay`
-//!   feature, [`satay::SatayCollector`] adapts any
+//!   feature, `satay::SatayCollector` adapts any
 //!   [satay](https://docs.rs/satay-runtime)-generated API client into a
 //!   collector.
 //! - [`Sink`]: receives records. Sinks compose like tower layers — any
 //!   number of buffering tiers ([`Tier`], each backed by a pluggable
 //!   [`Store`]: in-memory [`MemStore`], durable write-ahead [`JsonlStore`],
 //!   or your own), fan-out ([`Tee`]), and terminal sinks such as
-//!   [`HfSink`] (feature `huggingface`) stack via [`SinkExt`].
+//!   `HfSink` (feature `huggingface`) stack via [`SinkExt`].
 //!
 //! Pipelines (collector + sink stack) are supervised by the [`Meathook`]
 //! runtime: one tokio task each, respawn-on-panic with backoff, and a final

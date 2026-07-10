@@ -50,7 +50,8 @@ pub struct CommitAction {
     pub branch: String,
     pub token: String,
     pub summary: String,
-    /// Path of the file inside the repo, e.g. `data/pm25/2026-06-12/08-00.parquet`.
+    /// Path of the file inside the repo, e.g.
+    /// `data/pm25/2026-06-12/08-00-00-abe4fb8a17f5800b.parquet`.
     pub path_in_repo: String,
     pub content: Vec<u8>,
 }
@@ -153,6 +154,12 @@ impl Action for CommitAction {
 /// concurrency queue reached"`), so sinks committing to the same repo —
 /// e.g. one [`HfSink`] per pipeline — should share one clone of the same
 /// gate and queue client-side instead. Waiters acquire in FIFO order.
+///
+/// The permit is held for the duration of one send attempt, so give gated
+/// clients a request timeout ([`reqwest::ClientBuilder::timeout`]) — with
+/// the reqwest default of no timeout, one upload stalled by the network
+/// blocks every sink sharing the gate until the OS abandons the
+/// connection.
 #[derive(Debug, Clone)]
 pub struct CommitGate(Arc<Semaphore>);
 
@@ -190,17 +197,26 @@ fn transient(error: &HfSinkError) -> bool {
 /// a `HuggingFace` dataset repo at a deterministic, Hive-style path:
 ///
 /// ```text
-/// data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet
+/// data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{fnv1a64(content)}.parquet
 /// ```
 ///
-/// The path depends only on the window start, so replaying a window (crash
-/// after upload but before the spool segment was deleted) overwrites the
-/// same file with the same content — replays are idempotent.
+/// The path is keyed by the full window start *and* a fingerprint of the
+/// encoded parquet bytes:
 ///
-/// Transient failures ([`transient`]: transport errors, 429, 5xx) retry a
-/// few times in-sink with backoff before the error propagates; an upstream
-/// [`Tier`] retains records when this sink errors and retries at its next
-/// firing (or replays them on the next start).
+/// - Replaying a window (crash after upload but before the spool segment
+///   was deleted) re-encodes the same records to the same bytes and
+///   overwrites the same file — replays stay idempotent.
+/// - Distinct windows never collide: the start is spelled out to the
+///   second, covering any `FlushPolicy::every` down to 1s.
+/// - Repeated drains of *one* window key — the `FlushPolicy`
+///   `max_records` valve firing mid-window, or a failed drain retried
+///   after more records arrived — differ in content, so each chunk lands
+///   in its own file instead of silently overwriting the previous commit.
+///
+/// Transient failures (transport errors, 429, 5xx) retry a few times
+/// in-sink with backoff before the error propagates; an upstream [`Tier`]
+/// retains records when this sink errors and retries at its next firing
+/// (or replays them on the next start).
 ///
 /// [`Tier`]: crate::Tier
 pub struct HfSink<R> {
@@ -257,19 +273,34 @@ impl<R> HfSink<R> {
     }
 }
 
-/// Keyed by the full window start down to the minute: sub-hourly windows
-/// (`FlushPolicy::every` < 1h) land in distinct files instead of
-/// overwriting the same `{HH}.parquet` within an hour.
-fn object_path(meta: &WindowMeta) -> String {
+/// FNV-1a 64-bit — stable across releases (the fingerprint is load-bearing
+/// for replay idempotency: same bytes must map to the same path forever).
+fn fingerprint(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+    bytes.iter().fold(OFFSET_BASIS, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    })
+}
+
+/// Keyed by the full window start plus a fingerprint of the parquet
+/// bytes. The start (to the second) identifies the window — distinct
+/// windows get distinct paths no matter their content; the fingerprint
+/// separates repeated drains of one window — paths only ever collide when
+/// window *and* content match, and then overwriting is a no-op (see
+/// [`HfSink`] docs).
+fn object_path(meta: &WindowMeta, content: &[u8]) -> String {
     let date = meta.start.date();
     format!(
-        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}.parquet",
+        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}-{:02}-{:016x}.parquet",
         meta.pipeline,
         date.year(),
         u8::from(date.month()),
         date.day(),
         meta.start.hour(),
         meta.start.minute(),
+        meta.start.second(),
+        fingerprint(content),
     )
 }
 
@@ -284,7 +315,7 @@ where
             return Ok(());
         }
         let content = encode::to_parquet(&records)?;
-        let path_in_repo = object_path(meta);
+        let path_in_repo = object_path(meta, &content);
         let action = CommitAction {
             repo: self.repo.clone(),
             branch: self.branch.clone(),
@@ -343,7 +374,7 @@ mod tests {
             branch: "main".into(),
             token: "hf_secret".into(),
             summary: "meathook: pm25 window".into(),
-            path_in_repo: "data/pm25/2026-06-12/08-00.parquet".into(),
+            path_in_repo: "data/pm25/2026-06-12/08-00-00-abe4fb8a17f5800b.parquet".into(),
             content: b"PARQUET".to_vec(),
         }
     }
@@ -376,7 +407,10 @@ mod tests {
 
         let file: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(file["key"], "file");
-        assert_eq!(file["value"]["path"], "data/pm25/2026-06-12/08-00.parquet");
+        assert_eq!(
+            file["value"]["path"],
+            "data/pm25/2026-06-12/08-00-00-abe4fb8a17f5800b.parquet"
+        );
         assert_eq!(file["value"]["encoding"], "base64");
         let decoded = BASE64
             .decode(file["value"]["content"].as_str().unwrap())
@@ -414,6 +448,9 @@ mod tests {
         }
     }
 
+    /// Pins the exact path for known bytes: the fingerprint is
+    /// load-bearing for replay idempotency, so a hash-algorithm change
+    /// must show up as a failure here.
     #[test]
     fn object_path_is_hive_partitioned() {
         let meta = WindowMeta {
@@ -422,19 +459,48 @@ mod tests {
             end: datetime!(2026-06-12 09:00 UTC),
         };
         assert_eq!(
-            object_path(&meta),
-            "data/air_temperature/2026-06-12/08-00.parquet"
+            object_path(&meta, b"PARQUET"),
+            "data/air_temperature/2026-06-12/08-00-00-abe4fb8a17f5800b.parquet"
         );
     }
 
     #[test]
-    fn object_path_keeps_sub_hourly_windows_distinct() {
-        let meta = WindowMeta {
+    fn object_path_keeps_windows_distinct_down_to_seconds() {
+        let at = |start: time::OffsetDateTime| WindowMeta {
             pipeline: "pm25".into(),
+            start,
+            end: start + Duration::from_secs(30),
+        };
+        assert_eq!(
+            object_path(&at(datetime!(2026-07-02 13:20 UTC)), b"PARQUET"),
+            "data/pm25/2026-07-02/13-20-00-abe4fb8a17f5800b.parquet"
+        );
+        // Two 30s windows in the same minute with identical payloads:
+        // the seconds field keeps their files apart.
+        assert_eq!(
+            object_path(&at(datetime!(2026-07-02 13:20:30 UTC)), b"PARQUET"),
+            "data/pm25/2026-07-02/13-20-30-abe4fb8a17f5800b.parquet"
+        );
+    }
+
+    /// Repeated drains of one window key (`max_records` valve mid-window,
+    /// or a failed drain retried after more records arrived) must not
+    /// overwrite each other; identical content must (replay idempotency).
+    #[test]
+    fn object_path_separates_chunks_of_one_window() {
+        let meta = WindowMeta {
+            pipeline: "rainfall".into(),
             start: datetime!(2026-07-02 13:20 UTC),
             end: datetime!(2026-07-02 13:30 UTC),
         };
-        assert_eq!(object_path(&meta), "data/pm25/2026-07-02/13-20.parquet");
+        let first = object_path(&meta, b"chunk-1");
+        let second = object_path(&meta, b"chunk-2");
+        assert_ne!(first, second);
+        assert_eq!(
+            first,
+            "data/rainfall/2026-07-02/13-20-00-e58fad5f76c7ba24.parquet"
+        );
+        assert_eq!(object_path(&meta, b"chunk-1"), first);
     }
 
     #[test]

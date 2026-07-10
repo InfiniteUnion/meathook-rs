@@ -177,7 +177,13 @@ fn load_config(config_path: &str) -> anyhow::Result<Config> {
 
 fn ctx_from_config(config: &Config) -> anyhow::Result<Ctx> {
     Ok(Ctx {
-        client: reqwest::Client::new(),
+        // The timeout matters beyond hygiene: a stalled HF upload holds the
+        // commit gate's permit, blocking every other pipeline's commit
+        // until this one is abandoned.
+        client: reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .context("building http client")?,
         api_key: std::env::var("X_API_KEY").ok(),
         repo: config.sink.huggingface.repo.clone(),
         branch: config.sink.huggingface.branch.clone(),
