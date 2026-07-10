@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/InfiniteUnion/meathook-rs/compare/v0.1.2...v0.2.0) - 2026-07-10
+
+### Added
+
+- make intermediate spool a generic memory tier
+
 ### Added
 
 - `Store` / `Segment` traits (`meathook::store`): pluggable window-keyed
