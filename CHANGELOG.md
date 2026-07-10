@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `SinkStack`: compose buffering tiers in incoming record order, then finish
+  the concrete stack with `.terminal(sink)`.
+
+### Changed
+
+- Sink composition APIs and examples now read in incoming record order.
+- The NEA reference consumer now demonstrates
+  `MemStore → JsonlStore → HfSink`.
+
+### Removed
+
+- **Breaking:** `SinkExt::tier`. Migrate
+  `terminal.tier(jsonl, jsonl_policy).tier(mem, mem_policy)` to
+  `SinkStack::new().tier(mem, mem_policy).tier(jsonl, jsonl_policy).terminal(terminal)`;
+  both forms produce the same concrete nested `Tier` topology.
+
 ## [0.2.0](https://github.com/InfiniteUnion/meathook-rs/compare/v0.1.2...v0.2.0) - 2026-07-10
 
 ### Added

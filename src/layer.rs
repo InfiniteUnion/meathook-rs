@@ -1,17 +1,20 @@
 //! Sink combinators: the tower-layer part of meathook.
 //!
-//! Flush tiers stack: `Tier(MemStore) → Tier(JsonlStore) → HfSink`, each
-//! tier with its own [`FlushPolicy`] and [`Store`] backend. Each tier owns
-//! its records until *its* policy fires, then pushes downstream.
+//! Build buffering tiers in record-entry order with [`SinkStack`]:
+//! `MemStore → JsonlStore → terminal`. Each tier owns its records until its
+//! [`FlushPolicy`] fires, then pushes them to the next declared tier.
 
 use std::error;
 use std::time::Duration;
 
 use crate::sink::{Sink, WindowMeta};
-use crate::store::Store;
 
+mod builder;
 mod tier;
 
+#[doc(hidden)]
+pub use builder::BuildSinkStack;
+pub use builder::SinkStack;
 pub use tier::{Tier, TierError};
 
 /// When a buffering layer pushes its held records downstream.
@@ -52,23 +55,11 @@ impl FlushPolicy {
     }
 }
 
-/// Builder-style composition for sinks, mirroring tower's `ServiceBuilder`.
+/// Extension combinators for completed sinks.
 ///
-/// ```ignore
-/// let sink = hf_sink.tier(JsonlStore::new("/var/lib/meathook/spool/pm25"), FlushPolicy::hourly());
-/// ```
+/// Build buffering layers with [`SinkStack`]; this trait supplies fan-out
+/// after a sink or stack has been completed.
 pub trait SinkExt<R>: Sink<R> + Sized {
-    /// Wrap `self` in a buffering tier backed by `store`.
-    ///
-    /// The store decides durability: [`MemStore`](crate::MemStore) holds
-    /// records in memory, [`JsonlStore`](crate::JsonlStore) is a durable
-    /// write-ahead spool. Tiers nest to taste — zero tiers is fine too, a
-    /// terminal sink works on its own.
-    #[must_use]
-    fn tier<St: Store<R>>(self, store: St, policy: FlushPolicy) -> Tier<R, St, Self> {
-        Tier::new(store, policy, self)
-    }
-
     /// Fan out: every batch is ingested into both `self` and `other`.
     #[must_use]
     fn tee<B: Sink<R>>(self, other: B) -> Tee<Self, B> {

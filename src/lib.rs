@@ -15,11 +15,11 @@
 //!   feature, `satay::SatayCollector` adapts any
 //!   [satay](https://docs.rs/satay-runtime)-generated API client into a
 //!   collector.
-//! - [`Sink`]: receives records. Sinks compose like tower layers — any
-//!   number of buffering tiers ([`Tier`], each backed by a pluggable
-//!   [`Store`]: in-memory [`MemStore`], durable write-ahead [`JsonlStore`],
-//!   or your own), fan-out ([`Tee`]), and terminal sinks such as
-//!   `HfSink` (feature `huggingface`) stack via [`SinkExt`].
+//! - [`Sink`]: receives records. [`SinkStack`] composes any number of
+//!   buffering tiers ([`Tier`]), each backed by a pluggable [`Store`]:
+//!   in-memory [`MemStore`], durable write-ahead [`JsonlStore`], or your own.
+//!   Finish the stack with a terminal sink such as `HfSink` (feature
+//!   `huggingface`); fan out completed sinks with [`SinkExt::tee`].
 //!
 //! Pipelines (collector + sink stack) are supervised by the [`Meathook`]
 //! runtime: one tokio task each, respawn-on-panic with backoff, and a final
@@ -39,7 +39,7 @@ pub mod store;
 pub(crate) mod test_util;
 
 pub use collector::Collector;
-pub use layer::{FlushPolicy, SinkExt, Tee, TeeError, Tier, TierError};
+pub use layer::{FlushPolicy, SinkExt, SinkStack, Tee, TeeError, Tier, TierError};
 pub use pipeline::Pipeline;
 pub use runtime::{Meathook, MeathookBuilder, RuntimeError};
 #[cfg(feature = "satay")]

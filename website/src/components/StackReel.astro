@@ -4,7 +4,7 @@ const reels = [
     label: 'outer tier',
     items: [
       { name: 'Tier<MemStore>', detail: 'five-minute process-local window' },
-      { name: 'Tier<JsonlStore>', detail: 'durable window from the first append' },
+      { name: 'Tier<JsonlStore>', detail: 'fsynced from the first batch received' },
       { name: 'Tier<MemStore>', detail: 'record-count safety valve' },
       { name: 'Tier<YourStore>', detail: 'any Store<R> implementation' },
     ],
@@ -73,9 +73,9 @@ const reels = [
 
       <div class="slot-footer">
         <div class="slot-methods" aria-hidden="true">
-          <code>sink.encoder(encoder)</code>
-          <span>then wrap with</span>
-          <code>sink.tier(store, policy)</code>
+          <code>SinkStack::new().tier(store, policy)</code>
+          <span>in flow order, then</span>
+          <code>.terminal(sink.encoder(encoder))</code>
         </div>
         <button
           type="button"

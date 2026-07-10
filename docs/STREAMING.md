@@ -142,8 +142,8 @@ machinery.
 ## What stays the same (explicitly)
 
 - `Collector`, `Pipeline`, `with_key_fn`, dedupe — untouched.
-- `Sink`, `Tier`, the `Store` backends, `FlushPolicy`, `SinkExt` —
-  untouched.
+- `Sink`, `Tier`, `SinkStack`, the `Store` backends, `FlushPolicy`, and
+  `SinkExt::tee` — untouched.
 - `HfSink`, `CommitAction`, encode, satay adapter — untouched.
 - `MeathookBuilder::pipeline`, supervisor, signal handling, factory respawn
   — untouched (`.source` is additive).
@@ -164,9 +164,10 @@ tokio::spawn(async move {
 
 Meathook::builder()
     .source(move || {
-        let sink = HfSink::new(client.clone(), "you/sensor", token.clone())
+        let sink = SinkStack::new()
             .tier(MemStore::new(), FlushPolicy::every(Duration::from_secs(60)))
-            .tier(JsonlStore::new(spool_dir.join("sensor")), FlushPolicy::hourly());
+            .tier(JsonlStore::new(spool_dir.join("sensor")), FlushPolicy::hourly())
+            .terminal(HfSink::new(client.clone(), "you/sensor", token.clone()));
         StreamPipeline::new(
             NamedStream::new("sensor", ReceiverStream::new(rx)),
             sink,

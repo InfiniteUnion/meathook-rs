@@ -2,15 +2,15 @@
 const rows = [
   {
     failure: 'SIGKILL / OOM-kill',
-    happens: 'JsonlStore replays leftover segments on the next start',
-    lost: '≤ 1 torn record',
+    happens: 'JsonlStore replays batches it received; outer MemStore state is gone',
+    lost: 'outer memory window + ≤ 1 torn JSONL record',
     severity: 'warn' as const,
   },
   {
     failure: 'Task panic',
-    happens: 'supervisor rebuilds the pipeline and every tier',
-    lost: 'none',
-    severity: 'ok' as const,
+    happens: 'supervisor rebuilds; JsonlStore replays batches it received',
+    lost: 'records still held in MemStore',
+    severity: 'warn' as const,
   },
   {
     failure: 'Sink outage (HF 5xx)',
@@ -44,10 +44,12 @@ const rows = [
     <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
       <code class="font-mono text-sm text-ink">Tier</code> owns windowing,
       flush policy, and replay over any <code class="font-mono text-sm text-ink">Store&lt;R&gt;</code>.
-      <code class="font-mono text-sm text-ink">MemStore</code> stays process-local;
-      <code class="font-mono text-sm text-ink">JsonlStore</code> fsyncs records
-      before <code class="font-mono text-sm text-ink">ingest</code> returns.
-      Implement the same trait for SQLite, object storage, or another backend.
+      An outer <code class="font-mono text-sm text-ink">MemStore</code> trades a
+      bounded volatile window for fewer fsyncs; a
+      <code class="font-mono text-sm text-ink">JsonlStore</code>-backed tier
+      fsyncs batches when they reach it and retains them until its downstream
+      accepts them. Implement the same trait for SQLite, object storage, or
+      another backend.
     </p>
 
     <div class="mt-10 overflow-x-auto">

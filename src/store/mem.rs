@@ -6,9 +6,13 @@ use std::ops::Bound;
 
 use super::{Segment, Store};
 
-/// In-memory store. Nothing survives a crash; stack a durable tier below
-/// (e.g. backed by [`JsonlStore`](super::JsonlStore)) when you need
-/// write-ahead guarantees.
+/// In-memory store. Nothing survives a crash. If its [`Tier`](crate::Tier)
+/// wraps a durable tier, records remain volatile until this tier's policy
+/// forwards them downstream.
+///
+/// When every successful top-level ingest must remain crash-durable until
+/// terminal delivery, use a [`JsonlStore`](super::JsonlStore) tier directly
+/// around the durable or terminal sink, with no `MemStore` before or after it.
 ///
 /// Requires `R: Clone`: [`Sink::ingest`](crate::Sink::ingest) consumes its
 /// `Vec<R>`, so the segment hands downstream a clone and the original stays
