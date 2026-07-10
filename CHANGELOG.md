@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/InfiniteUnion/meathook-rs/compare/v0.1.2...v0.2.0) - 2026-07-10
+
+### Added
+
+- generic Encoder trait — split format out of HfSink
+- make intermediate spool a generic memory tier
+
+### Fixed
+
+- review findings — content-keyed object paths, doc link, client timeout
+- shutdown-flush HF commit contention + sub-hourly path clobbering
+
+### Other
+
+- run test job across the feature matrix
+
 ### Added
 
 - `Store` / `Segment` traits (`meathook::store`): pluggable window-keyed
