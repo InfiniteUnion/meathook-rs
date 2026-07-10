@@ -132,11 +132,13 @@ the `max_records` valve — never collide.
 
 ## HuggingFace sink
 
-`HfSink` commits one parquet file per window via a hand-written, sans-IO
+`HfSink` commits one file per window via a hand-written, sans-IO
 `CommitAction` implementing `satay_runtime::Action` (NDJSON commit payload,
 base64-inlined file), sent through `satay_reqwest` — the same transport path
-as the collectors. The Hive-style partitioning keeps the HF dataset viewer
-happy.
+as the collectors. The wire format is pluggable via `HfSink::encoder`:
+`ParquetEncoder` is the default, `JsonEncoder` is always available, and
+`CsvEncoder` sits behind the `csv` feature. The Hive-style partitioning
+keeps the HF dataset viewer happy.
 
 Transient failures (transport errors, 429, 5xx) retry a few times in-sink
 with backoff; beyond that, an upstream `Tier` retains the records and
@@ -150,13 +152,15 @@ timeout so a stalled upload cannot hold the gate indefinitely.
 
 | Feature | Default | Implies | What it enables |
 |---|---|---|---|
-| `parquet` | ✓ | — | `encode::to_parquet` (arrow + parquet + serde_arrow) |
+| `parquet` | ✓ | — | `Encoder` trait + `ParquetEncoder` (arrow + parquet + serde_arrow) |
+| `csv` | — | — | `CsvEncoder`: CSV window encoding |
 | `satay` | — | — | `SatayCollector`: any satay-generated API client as a `Collector` |
 | `huggingface` | ✓ | `parquet`, `satay` | `HfSink` + sans-IO `CommitAction` |
 
 With `--no-default-features` you get the core traits, sink combinators,
-write-ahead spool, and supervised runtime — no HTTP/IO stack pulled in
-(transitively satay-free) — bring your own collector and terminal sink.
+write-ahead spool, supervised runtime, and the always-on `Encoder` trait +
+`JsonEncoder` — no HTTP/IO stack pulled in (transitively satay-free) —
+bring your own collector and terminal sink.
 
 ## Configuration
 

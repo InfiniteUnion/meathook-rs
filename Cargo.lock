@@ -1279,6 +1279,7 @@ dependencies = [
  "arrow",
  "base64",
  "bytes",
+ "csv",
  "http",
  "humantime-serde",
  "nea-rs",
