@@ -116,8 +116,11 @@ reference consumer: three NEA pipelines, TOML config, graceful shutdown.
 A `Tier` backed by `JsonlStore` is a write-ahead spool: `ingest` appends
 records as JSON lines to an fsynced segment file *before returning*, and
 segments are deleted only after the downstream sink accepted them. Storage
-paths are deterministic per window
-(`data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet`), so replays are idempotent.
+paths are deterministic per window and content
+(`data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{hash}.parquet`): a replayed
+window re-encodes to the same bytes and overwrites its own file, while
+distinct payloads — sub-hourly windows, or one window drained in chunks by
+the `max_records` valve — never collide.
 
 | Failure | What happens | Data lost |
 |---|---|---|
@@ -140,7 +143,8 @@ with backoff; beyond that, an upstream `Tier` retains the records and
 retries at its next firing. Pipelines committing to the same repo should
 share a `CommitGate` (`HfSink::gate`) so concurrent flushes — e.g. every
 pipeline's final window on shutdown — queue client-side instead of piling
-into HF's per-repo commit concurrency queue.
+into HF's per-repo commit concurrency queue; give gated clients a request
+timeout so a stalled upload cannot hold the gate indefinitely.
 
 ## Feature flags
 

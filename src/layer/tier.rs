@@ -40,6 +40,13 @@ where
 /// the store only after the downstream sink accepted it — a transient
 /// outage of the terminal sink does not lose data held in this tier.
 ///
+/// One window key can drain downstream **more than once**: the
+/// `max_records` valve fires mid-window and later records re-open the same
+/// key, and a failed drain is retried after the window has grown. Both
+/// deliveries carry the same [`WindowMeta`], so a terminal sink that keys
+/// storage by window start alone would overwrite the earlier chunk — key
+/// by content as well, as `HfSink` (feature `huggingface`) does.
+///
 /// A window whose delivery keeps failing (for example a record the
 /// terminal sink deterministically rejects) does not stall the pipeline:
 /// each drain pass attempts every closed window oldest-first, retains the

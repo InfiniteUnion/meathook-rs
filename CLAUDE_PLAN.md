@@ -50,33 +50,48 @@ options chosen: gate + retry, window-keyed path):
   everything else. Worst case this adds ~14s per still-failing commit to shutdown —
   the ERROR + replay-on-next-start path stays as the final fallback, unchanged.
 
-### 3. Window-keyed object path (fixes sub-hourly clobbering)
+### 3. Content-keyed object path (fixes sub-hourly + same-window clobbering)
 
 `src/sink/huggingface.rs`:
-- `object_path` → `data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}.parquet` (minute from
-  `meta.start`, i.e. the window start reconstructed by `Tier::drain`). No clobbering at
-  any window size; replays stay idempotent (path still depends only on window start).
-- Update the module/`HfSink` doc examples (`08.parquet` → `08-00.parquet`) and the
-  layout string in `README.md:120`.
+- `object_path` → `data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{fnv1a64(content)}.parquet`
+  (window start from `meta.start` as reconstructed by `Tier::drain`, plus an FNV-1a
+  64-bit fingerprint of the parquet bytes). Review of the `{HH}-{MM}` draft caught two
+  residual overwrite modes: sub-*minute* windows within one minute, and — at any window
+  size — repeated drains of one window key (`max_records` valve firing mid-window, or a
+  failed drain retried after the window grew) committing different chunks to the same
+  path. Seconds key the window; the fingerprint keys the chunk. Replays stay idempotent:
+  identical records re-encode to identical bytes, so a replay overwrites its own file.
+  FNV-1a is hand-rolled (6 lines) — no new dependency, and the algorithm must stay
+  frozen since the fingerprint is load-bearing for replay idempotency.
+- Update the module/`HfSink` doc examples and the layout string in `README.md`; note the
+  multi-drain contract on `Tier`'s docs (terminal sinks keyed by window start alone
+  overwrite).
 
 ### 4. Example wiring
 
 `examples/nea_weather.rs`:
 - `Ctx` gains `gate: CommitGate`, created once in `ctx_from_config`.
 - `Ctx::tiered_hf` adds `.gate(self.gate.clone())` to the sink construction.
+- The shared `reqwest::Client` gets `.timeout(60s)`: a stalled upload holds the gate's
+  permit, so without a timeout one dead connection blocks every pipeline's commits.
 
 ### 5. Bookkeeping
 
-- `CHANGELOG.md`: entry under unreleased — commit gate, transient retry, **breaking**
-  dataset layout change (`{HH}.parquet` → `{HH}-{MM}.parquet`).
+- `CHANGELOG.md`: entry under unreleased — commit gate (+ timeout guidance), transient
+  retry, **breaking** dataset layout change (`{HH}.parquet` →
+  `{HH}-{MM}-{SS}-{fnv1a64}.parquet`) with migration note for old-named files.
 
 ## Tests
 
 In `src/sink/huggingface.rs` tests (sans-IO style, no HTTP server needed):
 - `transient()` classification: 429 → true, 500/503 → true, 401/400 → false.
-- Update `object_path_is_hive_partitioned` for `08-00.parquet`; add a sub-hourly case
-  (13:20 window → `13-20.parquet`) proving distinct windows get distinct paths.
-- Update the `path_in_repo` fixture in `commit_request_shape` if desired (cosmetic).
+- `object_path_is_hive_partitioned` pins the exact path for known bytes (the
+  fingerprint is a stability contract — an algorithm change must fail this test).
+- `object_path_keeps_windows_distinct_down_to_seconds`: two 30s windows in one minute
+  with identical payloads get distinct paths.
+- `object_path_separates_chunks_of_one_window`: same window, different content →
+  different paths; same content → same path (replay idempotency).
+- `path_in_repo` fixture in `commit_request_shape` updated to the new naming.
 
 ## Verification (end-to-end)
 
@@ -84,7 +99,7 @@ In `src/sink/huggingface.rs` tests (sans-IO style, no HTTP server needed):
 2. `HF_TOKEN=... cargo run --example nea_weather -- examples/meathook.toml`:
    - Startup replay should commit the two leftover spool segments
      (`spool-test/{air_temperature,rainfall}/1782998400.jsonl`) under the new naming
-     (`13-20.parquet`) and delete the jsonl files.
+     (`13-20-00-{hash}.parquet`) and delete the jsonl files.
    - Let it run past a 10m window boundary, then Ctrl+C: expect three sequential
      `committed window` INFO lines (gate serializes them), **no** `final flush failed`
      ERRORs, and empty `spool-test/*/` dirs.
