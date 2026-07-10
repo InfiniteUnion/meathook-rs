@@ -9,6 +9,7 @@ on:
       - "**/build.rs"
       - "tests/**"
       - ".github/actions/setup-rust/**"
+      - ".github/workflows/qc.yml"
 
 permissions:
   contents: read
@@ -75,11 +76,26 @@ jobs:
         run: cargo dylint --all
 
   test:
-    name: Test
+    name: Test (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # csv is off by default and the core must build dependency-free with
+      # --no-default-features, so exercise the corners of the feature
+      # lattice instead of just the default set.
+      matrix:
+        include:
+          - name: default
+            flags: ""
+          - name: all-features
+            flags: "--all-features"
+          - name: no-default-features
+            flags: "--no-default-features"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
+        with:
+          cache-key: test-${{ matrix.name }}
       - name: Test
-        run: cargo test
+        run: cargo test ${{ matrix.flags }}
