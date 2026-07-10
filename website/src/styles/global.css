@@ -2,21 +2,45 @@
 @import "@arborium/arborium/themes/base.css";
 @import "@arborium/arborium/themes/rose-pine-moon.css";
 
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/hanken-grotesk-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: optional;
+  src: url("/fonts/newsreader-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Victor Mono";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/victor-mono-latin.woff2") format("woff2");
+}
+
 @theme {
-  /* palette — near-black spool ground, crimson accent (matches logo), semantic amber */
+  /* Near-black spool ground, crimson accent, semantic amber. */
   --color-ground: #0B0E10;
   --color-surface: #14181B;
   --color-surface-2: #1A1F23;
   --color-hairline: #232A2F;
   --color-ink: #E8E6E1;
-  --color-ink-dim: #8A8F93;
-  --color-ink-faint: #555B60;
+  --color-ink-dim: #A6AAAD;
+  --color-ink-faint: #858A8E;
   --color-accent: #C8253B;
   --color-accent-soft: #2E1115;
-  --color-warn: #B45309;
+  --color-warn: #E38D3E;
   --color-warn-soft: #2A1808;
 
-  /* type — editorial serif display, humanist grotesk body, victor mono for data */
+  /* Editorial serif display, humanist grotesk body, Victor Mono for data. */
   --font-display: "Newsreader", Georgia, serif;
   --font-body: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Victor Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -45,6 +69,11 @@
   :focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 3px;
+  }
+
+  main p a {
+    text-decoration: underline;
+    text-underline-offset: 0.25rem;
   }
 }
 
@@ -80,6 +109,7 @@
    The base.css maps <a-*> tags to --arb-*-light in light mode; we point all
    light vars at the dark values so the block is always dark. */
 pre[data-arborium] {
+  --arb-c-dark: var(--color-ink-faint);
   --arb-at-light: var(--arb-at-dark);
   --arb-bg-light: var(--arb-bg-dark);
   --arb-c-light: var(--arb-c-dark);

@@ -1,0 +1,392 @@
+---
+const reels = [
+  {
+    label: 'outer tier',
+    items: [
+      { name: 'Tier<MemStore>', detail: 'five-minute process-local window' },
+      { name: 'Tier<JsonlStore>', detail: 'durable window from the first append' },
+      { name: 'Tier<MemStore>', detail: 'record-count safety valve' },
+      { name: 'Tier<YourStore>', detail: 'any Store<R> implementation' },
+    ],
+  },
+  {
+    label: 'inner tier',
+    items: [
+      { name: 'Tier<JsonlStore>', detail: 'hourly write-ahead window' },
+      { name: 'no second tier', detail: 'zero or one tier is valid' },
+      { name: 'Tier<MemStore>', detail: 'another independent cadence' },
+      { name: 'Tier<JsonlStore>', detail: 'nest tiers as deeply as needed' },
+    ],
+  },
+  {
+    label: 'file encoder',
+    items: [
+      { name: 'ParquetEncoder', detail: 'the HfSink default' },
+      { name: 'JsonEncoder', detail: 'always available' },
+      { name: 'CsvEncoder', detail: 'enabled by the csv feature' },
+      { name: 'YourEncoder', detail: 'implement Encoder once' },
+    ],
+  },
+  {
+    label: 'terminal sink',
+    items: [
+      { name: 'HfSink', detail: 'commit to a Hugging Face dataset' },
+      { name: 'HfSink', detail: 'same sink, different wire format' },
+      { name: 'HfSink', detail: 'encoder selects the extension' },
+      { name: 'YourSink', detail: 'implement Sink<R> for any destination' },
+    ],
+  },
+];
+---
+
+<section class="border-t hairline" data-stack-reel>
+  <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
+    <h2 class="max-w-[48rem] font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
+      One stack. Four independent choices.
+    </h2>
+    <p class="mt-6 max-w-[46rem] text-lg leading-relaxed text-ink-dim">
+      A tier owns policy, a Store owns records, an Encoder owns bytes, and the
+      terminal owns delivery. Swap one without rewriting the others.
+    </p>
+
+    <div class="slot-machine mt-12">
+      <div class="slot-grid" aria-hidden="true">
+        {reels.map((reel, reelIndex) => (
+          <>
+            <div class="slot-column">
+              <p class="slot-label">{reel.label}</p>
+              <div class="slot-window" data-slot-window>
+                {reel.items.map((item, itemIndex) => (
+                  <div class={`slot-item ${itemIndex === 0 ? 'is-current' : ''}`} data-slot-item>
+                    <code>{item.name}</code>
+                    <span>{item.detail}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {reelIndex < reels.length - 1 && (
+              <span class="slot-connector" aria-hidden="true">→</span>
+            )}
+          </>
+        ))}
+      </div>
+
+      <div class="slot-footer">
+        <div class="slot-methods" aria-hidden="true">
+          <code>sink.encoder(encoder)</code>
+          <span>then wrap with</span>
+          <code>sink.tier(store, policy)</code>
+        </div>
+        <button
+          type="button"
+          class="slot-toggle"
+          data-slot-toggle
+          aria-pressed="false"
+          hidden
+        >
+          Pause animation
+        </button>
+      </div>
+    </div>
+
+    <p class="sr-only">
+      Example stacks rotate through MemStore, JsonlStore, custom Store
+      implementations, ParquetEncoder, JsonEncoder, CsvEncoder, HfSink, and
+      custom terminal sinks. Tiers are optional and may be nested.
+    </p>
+  </div>
+</section>
+
+<style>
+  .slot-machine {
+    overflow: hidden;
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-surface) 72%, var(--color-ground));
+  }
+
+  .slot-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.25rem;
+  }
+
+  .slot-column {
+    min-width: 0;
+  }
+
+  .slot-label {
+    margin: 0 0 0.65rem;
+    color: var(--color-ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .slot-window {
+    position: relative;
+    min-height: 9.5rem;
+    overflow: hidden;
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    background: var(--color-ground);
+  }
+
+  .slot-window::before,
+  .slot-window::after {
+    position: absolute;
+    right: 0;
+    left: 0;
+    z-index: 3;
+    height: 1.75rem;
+    content: '';
+    pointer-events: none;
+  }
+
+  .slot-window::before {
+    top: 0;
+    background: linear-gradient(to bottom, var(--color-ground), transparent);
+  }
+
+  .slot-window::after {
+    bottom: 0;
+    background: linear-gradient(to top, var(--color-ground), transparent);
+  }
+
+  .slot-item {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1.25rem;
+    opacity: 0;
+    transform: translateY(-64%);
+    transition:
+      transform 900ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 520ms ease;
+    will-change: transform, opacity;
+  }
+
+  .slot-item.is-current {
+    z-index: 1;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .slot-item.is-leaving {
+    z-index: 2;
+    opacity: 0;
+    transform: translateY(64%);
+  }
+
+  .slot-item code {
+    overflow-wrap: anywhere;
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-size: clamp(0.78rem, 1.2vw, 0.95rem);
+  }
+
+  .slot-item span {
+    max-width: 17rem;
+    color: var(--color-ink-dim);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .slot-connector {
+    color: var(--color-accent);
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+  }
+
+  .slot-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    border-top: 1px solid var(--color-hairline);
+    padding: 1rem 1.25rem;
+    background: var(--color-ground);
+  }
+
+  .slot-methods {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--color-ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+  }
+
+  .slot-methods code {
+    color: var(--color-ink-dim);
+  }
+
+  .slot-toggle {
+    flex: 0 0 auto;
+    border: 1px solid var(--color-hairline);
+    border-radius: 2px;
+    padding: 0.55rem 0.8rem;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    white-space: nowrap;
+    transition: border-color 160ms ease, color 160ms ease, transform 160ms ease;
+  }
+
+  .slot-toggle:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 70%, var(--color-hairline));
+    color: var(--color-accent);
+  }
+
+  .slot-toggle:active {
+    transform: translateY(1px);
+  }
+
+  @media (max-width: 767px) {
+    .slot-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.75rem;
+      padding: 1rem;
+    }
+
+    .slot-window {
+      min-height: 7.75rem;
+    }
+
+    .slot-connector {
+      justify-self: center;
+      transform: rotate(90deg);
+    }
+
+    .slot-footer {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slot-item {
+      transition: none;
+      will-change: auto;
+    }
+  }
+</style>
+
+<script>
+  const root = document.querySelector('[data-stack-reel]') as HTMLElement | null;
+
+  if (root) {
+    const windows = Array.from(root.querySelectorAll('[data-slot-window]')) as HTMLElement[];
+    const reels = windows.map((windowEl) =>
+      Array.from(windowEl.querySelectorAll('[data-slot-item]')) as HTMLElement[],
+    );
+    const toggle = root.querySelector('[data-slot-toggle]') as HTMLButtonElement | null;
+    const reduceQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const cycleEvery = 6800;
+    const reelDelay = 190;
+    const transitionTime = 900;
+    let current = 0;
+    let intervalId: number | undefined;
+    let visible = false;
+    let paused = false;
+    let timers: number[] = [];
+
+    const clearTimers = () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers = [];
+    };
+
+    const stop = () => {
+      if (intervalId !== undefined) {
+        window.clearInterval(intervalId);
+        intervalId = undefined;
+      }
+    };
+
+    const start = () => {
+      if (reduceQuery.matches || paused || !visible || document.hidden || intervalId !== undefined) return;
+      intervalId = window.setInterval(cycle, cycleEvery);
+    };
+
+    const cycle = () => {
+      if (!reels.length || !reels[0]?.length) return;
+      const previous = current;
+      const next = (current + 1) % reels[0].length;
+      current = next;
+      clearTimers();
+
+      reels.forEach((items, reelIndex) => {
+        const timer = window.setTimeout(() => {
+          const outgoing = items[previous];
+          const incoming = items[next];
+          if (!outgoing || !incoming) return;
+
+          outgoing.classList.remove('is-current');
+          outgoing.classList.add('is-leaving');
+          incoming.classList.add('is-current');
+
+          const cleanupTimer = window.setTimeout(() => {
+            outgoing.classList.remove('is-leaving');
+          }, transitionTime);
+          timers.push(cleanupTimer);
+        }, reelIndex * reelDelay);
+        timers.push(timer);
+      });
+    };
+
+    const syncMotionPreference = () => {
+      if (reduceQuery.matches) {
+        stop();
+        clearTimers();
+        if (toggle) toggle.hidden = true;
+        return;
+      }
+      if (toggle) toggle.hidden = false;
+      start();
+    };
+
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        paused = !paused;
+        toggle.setAttribute('aria-pressed', String(paused));
+        toggle.textContent = paused ? 'Resume animation' : 'Pause animation';
+        if (paused) stop();
+        else start();
+      });
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        visible = Boolean(entry?.isIntersecting);
+        if (visible) start();
+        else stop();
+      },
+      { threshold: 0.3 },
+    );
+    observer.observe(root);
+
+    const onVisibilityChange = () => {
+      if (document.hidden) stop();
+      else start();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    reduceQuery.addEventListener('change', syncMotionPreference);
+    syncMotionPreference();
+
+    document.addEventListener('astro:before-swap', () => {
+      stop();
+      clearTimers();
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      reduceQuery.removeEventListener('change', syncMotionPreference);
+    }, { once: true });
+  }
+</script>

@@ -3,7 +3,10 @@ import { highlightCode } from '../lib/highlight.mjs';
 
 const code = `use std::{time::Duration, env};
 
-use meathook::{FlushPolicy, HfSink, Meathook, Pipeline, SatayCollector, SinkExt as _};
+use meathook::{
+    FlushPolicy, HfSink, JsonEncoder, JsonlStore, Meathook, MemStore,
+    Pipeline, SatayCollector, SinkExt as _,
+};
 use satay_reqwest::ReqwestActionExt as _;
 use reqwest::Client;
 
@@ -25,10 +28,18 @@ async fn main() -> Result<(), meathook::runtime::RuntimeError> {
                 |response| flatten(response),
             );
 
-            // Durable stack: every tick is fsynced to disk before ingest
-            // returns; hourly windows land on HF as parquet.
+            // Format and storage are independent choices. The outer memory
+            // tier batches for five minutes; the durable tier flushes hourly.
             let sink = HfSink::new(client.clone(), "you/your-dataset", token.clone())
-                .spooled("/var/lib/meathook/spool/air_temperature", FlushPolicy::hourly());
+                .encoder(JsonEncoder)
+                .tier(
+                    JsonlStore::new("/var/lib/meathook/spool/air_temperature"),
+                    FlushPolicy::hourly(),
+                )
+                .tier(
+                    MemStore::new(),
+                    FlushPolicy::new(Duration::from_secs(300), 10_000),
+                );
 
             Pipeline::new(collector, sink, Duration::from_secs(60))
                 .with_key_fn(|r: &MyRecord| (r.station_id.clone(), r.timestamp.clone()))
@@ -43,16 +54,15 @@ const lines = highlighted.split('\n');
 
 <section class="border-t hairline">
   <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
-    <p class="eyebrow mb-5">wire it in code</p>
     <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
-      Two traits, composed like tower layers.
+      Stores, encoders, and sinks compose.
     </h2>
     <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
-      There is no YAML plugin system. You implement&nbsp;
-      <code class="font-mono text-sm text-ink">Collector</code> and&nbsp;
-      <code class="font-mono text-sm text-ink">Sink</code>, and sinks compose
-      with the same&nbsp;<code class="font-mono text-sm text-ink">.spooled()</code>
-      &nbsp;combinator you'd expect from tower.
+      Implement <code class="font-mono text-sm text-ink">Store&lt;R&gt;</code>,
+      <code class="font-mono text-sm text-ink">Encoder</code>, or
+      <code class="font-mono text-sm text-ink">Sink&lt;R&gt;</code>. Compose them
+      with <code class="font-mono text-sm text-ink">.tier()</code> and
+      <code class="font-mono text-sm text-ink">.encoder()</code>.
     </p>
 
     <div class="group relative mt-10 overflow-x-auto rounded-sm border hairline bg-surface">
@@ -74,9 +84,9 @@ const lines = highlighted.split('\n');
     </div>
 
     <p class="mt-6 font-mono text-xs text-ink-faint">
-      records are plain structs &mdash;&nbsp;
+      records stay plain structs:&nbsp;
       <code class="text-ink-dim">#[derive(Serialize, Deserialize)]</code>
-      &nbsp;is all the parquet encoder needs
+      &nbsp;is enough for every built-in encoder
     </p>
   </div>
 </section>
@@ -108,7 +118,7 @@ const lines = highlighted.split('\n');
     flex: 0 0 1.5rem;
     width: 1.5rem;
     text-align: right;
-    color: color-mix(in srgb, var(--color-ink-faint) 60%, transparent);
+    color: var(--color-ink-faint);
     user-select: none;
   }
   .code-text { white-space: pre; }
