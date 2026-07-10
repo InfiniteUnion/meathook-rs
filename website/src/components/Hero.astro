@@ -8,8 +8,8 @@ const records = [
 ];
 
 const terminals = [
-  { name: 'HfSink', note: 'parquet encode + commit', dest: '→ huggingface' },
-  { name: 'SqliteSink', note: 'write to local db', dest: '→ sqlite' },
+  { name: 'HfSink', note: 'ParquetEncoder', dest: '→ .parquet' },
+  { name: 'HfSink', note: 'JsonEncoder', dest: '→ .json' },
   { name: 'YourSink', note: 'impl Sink<R>', dest: '→ anywhere' },
 ];
 ---
@@ -27,12 +27,11 @@ const terminals = [
       </p>
       <h1 class="font-display text-[2.75rem] leading-[1.05] tracking-[-0.02em] text-ink sm:text-6xl md:text-[4.25rem]">
         Capture ephemeral data.<br />
-        Compose the sink.<br />
         Lose <span class="italic text-accent">nothing.</span>
       </h1>
       <p class="mt-7 max-w-[30rem] text-lg leading-relaxed text-ink-dim">
-        A library-first base for long-running data collection jobs. Sinks
-        compose like tower layers. There is no YAML plugin system.
+        Store-backed tiers and file encoders compose in code. No YAML plugin
+        system, no boxed errors.
       </p>
 
       <div class="mt-9 flex flex-wrap items-center gap-3">
@@ -59,7 +58,7 @@ const terminals = [
       </div>
 
       <p class="mt-6 font-mono text-xs tracking-wide text-ink-faint">
-        ≤ 1 torn record on SIGKILL &middot; none on panic &middot; none on SIGTERM
+        ≤ 1 torn record on SIGKILL, none on panic or SIGTERM
       </p>
 
       <p class="mt-4 font-mono text-xs text-ink-faint">
@@ -72,19 +71,19 @@ const terminals = [
       <div
         class="stack-frame stack-buffered"
         data-tier="buffered"
-        aria-label="nested sink stack: Buffered wrapping DiskSpool wrapping a terminal sink"
+        aria-label="nested sink stack: Tier with MemStore wrapping Tier with JsonlStore wrapping an encoded terminal sink"
       >
         <div class="stack-label">
-          <span class="stack-name">Buffered</span>
+          <span class="stack-name">Tier&lt;MemStore&gt;</span>
           <span class="stack-meta">flush: 5m &middot; 10k records</span>
-          <span class="stack-tier">tier 1 &mdash; memory</span>
+          <span class="stack-tier">tier 1, process-local</span>
         </div>
 
         <div class="stack-frame stack-diskspool" data-tier="diskspool">
           <div class="stack-label">
-            <span class="stack-name">DiskSpool</span>
+            <span class="stack-name">Tier&lt;JsonlStore&gt;</span>
             <span class="stack-meta">flush: 1h</span>
-            <span class="stack-tier">tier 2 &mdash; fsynced</span>
+            <span class="stack-tier">tier 2, fsynced</span>
           </div>
 
           <div class="spool-surface spool-lines" data-spool>
@@ -105,8 +104,8 @@ const terminals = [
 
           <div class="stack-frame stack-terminal" data-tier="terminal">
             <div class="stack-label">
-              <span class="stack-name">terminal</span>
-              <span class="stack-tier">swappable</span>
+              <span class="stack-name">encoder + terminal</span>
+              <span class="stack-tier">both swappable</span>
             </div>
             <ul class="terminal-list" data-terminals>
               {terminals.map((t, i) => (
@@ -123,7 +122,7 @@ const terminals = [
       </div>
 
       <p class="mt-4 px-1 font-mono text-xs break-words text-ink-faint">
-        data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}.parquet &nbsp;&rarr;&nbsp; <span class="text-ink-dim">huggingface</span>
+        data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}-{"{MM}"}-{"{SS}"}-{"{hash}"}.{"{ext}"} &nbsp;&rarr;&nbsp; <span class="text-ink-dim">destination</span>
       </p>
     </div>
   </div>
@@ -304,7 +303,7 @@ const terminals = [
         const swapInterval = window.setInterval(() => {
           active = (active + 1) % terminalRows.length;
           setActive(active);
-        }, 2200);
+        }, 5200);
 
         // pause when hero is offscreen
         const io = new IntersectionObserver((entries) => {
@@ -352,7 +351,7 @@ const terminals = [
 
       const startTick = () => {
         appendTick();
-        tickInterval = window.setInterval(appendTick, 4000);
+        tickInterval = window.setInterval(appendTick, 5200);
       };
       const stopTick = () => {
         if (tickInterval) window.clearInterval(tickInterval);

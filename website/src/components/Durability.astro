@@ -2,32 +2,32 @@
 const rows = [
   {
     failure: 'SIGKILL / OOM-kill',
-    happens: 'leftover segments replayed on next start',
+    happens: 'JsonlStore replays leftover segments on the next start',
     lost: '≤ 1 torn record',
     severity: 'warn' as const,
   },
   {
     failure: 'Task panic',
-    happens: 'supervisor respawns the pipeline from its factory',
+    happens: 'supervisor rebuilds the pipeline and every tier',
     lost: 'none',
     severity: 'ok' as const,
   },
   {
     failure: 'Sink outage (HF 5xx)',
-    happens: 'segments accumulate on disk, retried each firing',
+    happens: 'the tier retains each window and retries on its next firing',
     lost: 'none',
     severity: 'ok' as const,
   },
   {
     failure: 'Graceful SIGTERM',
-    happens: 'runtime drains every sink stack before exit',
+    happens: 'runtime drains every tier and terminal before exit',
     lost: 'none',
     severity: 'ok' as const,
   },
   {
-    failure: 'Disk lost',
-    happens: 'spool gone',
-    lost: 'everything unflushed — use a PVC on k8s',
+    failure: 'Backing store lost',
+    happens: 'unflushed records in that Store are gone',
+    lost: 'choose JsonlStore on a PVC for crash recovery',
     severity: 'warn' as const,
   },
 ];
@@ -35,20 +35,19 @@ const rows = [
 
 <section class="border-t hairline">
   <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
-    <p class="eyebrow mb-5">durability</p>
     <div class="flex flex-col gap-3 md:flex-row md:items-baseline md:justify-between">
       <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
-        The disk is the buffer.
+        Durability is a store choice.
       </h2>
-      <p class="font-mono text-xs text-ink-faint">&mdash; disk.rs</p>
+      <p class="font-mono text-xs text-ink-faint">store/jsonl.rs</p>
     </div>
     <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
-      <code class="font-mono text-sm text-ink">DiskSpool</code> is a write-ahead
-      spool: <code class="font-mono text-sm text-ink">ingest</code> appends
-      records as JSON lines to an fsynced segment file&nbsp;
-      <em class="text-ink not-italic">before returning</em>, and segments are
-      deleted only after the downstream sink accepted them. Replays are
-      idempotent.
+      <code class="font-mono text-sm text-ink">Tier</code> owns windowing,
+      flush policy, and replay over any <code class="font-mono text-sm text-ink">Store&lt;R&gt;</code>.
+      <code class="font-mono text-sm text-ink">MemStore</code> stays process-local;
+      <code class="font-mono text-sm text-ink">JsonlStore</code> fsyncs records
+      before <code class="font-mono text-sm text-ink">ingest</code> returns.
+      Implement the same trait for SQLite, object storage, or another backend.
     </p>
 
     <div class="mt-10 overflow-x-auto">

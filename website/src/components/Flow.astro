@@ -25,14 +25,13 @@ const axisMarks = [0, 15, 30, 45, 60];
 
 <section class="border-t hairline bg-surface/30">
   <div class="mx-auto max-w-[84rem] px-6 py-20 md:py-28">
-    <p class="eyebrow mb-5">flow &middot; tick cadence</p>
     <h2 class="font-display text-4xl leading-tight tracking-[-0.01em] text-ink md:text-5xl">
       Each pipeline keeps its own rhythm.
     </h2>
     <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
-      Collectors tick at their own intervals &mdash; every minute, every five,
-      every hour. The sink stack buffers them all and ships a parquet file when
-      the flush window closes.
+      Collectors tick every minute, every five, or every hour. Store-backed
+      tiers choose when to flush; the selected encoder writes one file when
+      its window closes.
     </p>
 
     <div class="flow-chart mt-12 overflow-x-auto" data-flow>
@@ -97,7 +96,7 @@ const axisMarks = [0, 15, 30, 45, 60];
         <div class="flush-output" data-flush-output>
           <span class="flush-output-arrow" aria-hidden="true">&darr;</span>
           <code class="flush-output-path">
-            data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}.parquet
+            data/{"{pipeline}"}/{"{YYYY-MM-DD}"}/{"{HH}"}-{"{MM}"}-{"{SS}"}-{"{hash}"}.{"{ext}"}
           </code>
         </div>
       </div>
