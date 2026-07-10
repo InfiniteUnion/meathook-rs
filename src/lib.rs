@@ -26,7 +26,6 @@
 //! `flush()` through the whole stack on graceful shutdown.
 
 pub mod collector;
-#[cfg(feature = "parquet")]
 pub mod encode;
 pub mod layer;
 pub mod pipeline;
@@ -48,7 +47,10 @@ pub use satay::SatayCollector;
 pub use sink::{Sink, WindowMeta};
 pub use store::{JsonlStore, JsonlStoreError, MemStore, Segment, Store};
 
+#[cfg(feature = "csv")]
+pub use encode::{CsvEncoder, CsvError};
+pub use encode::{Encoder, JsonEncoder};
 #[cfg(feature = "parquet")]
-pub use encode::EncodeError;
+pub use encode::{ParquetEncodeError, ParquetEncoder};
 #[cfg(feature = "huggingface")]
 pub use sink::huggingface::{CommitGate, HfSink, HfSinkError};

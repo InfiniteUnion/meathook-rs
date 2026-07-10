@@ -1,5 +1,5 @@
-//! [`HfSink`]: terminal sink committing parquet files to a `HuggingFace`
-//! dataset repo.
+//! [`HfSink`]: terminal sink committing encoded window files (parquet by
+//! default) to a `HuggingFace` dataset repo.
 //!
 //! Sans-IO, satay-style: a hand-written [`CommitAction`] implements
 //! [`satay_runtime::Action`] and is sent through
@@ -9,6 +9,7 @@
 //! `OpenAPI` treatment only in 3.2 `itemSchema`); once one exists, swapping it
 //! in is a drop-in change behind the `Action` boundary.
 
+use std::error;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,14 +25,14 @@ use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::encode::{self, EncodeError};
+use crate::encode::{Encoder, ParquetEncodeError, ParquetEncoder};
 use crate::sink::{Sink, WindowMeta};
 
 /// Error from the `HuggingFace` sink.
 #[derive(Debug, thiserror::Error)]
-pub enum HfSinkError {
+pub enum HfSinkError<E: error::Error + Send + Sync + 'static = ParquetEncodeError> {
     #[error(transparent)]
-    Encode(#[from] EncodeError),
+    Encode(E),
     #[error("transport error: {0}")]
     Transport(#[from] satay_reqwest::Error),
     #[error("hugging face rejected commit ({status}): {body}")]
@@ -183,7 +184,7 @@ const COMMIT_ATTEMPTS: u32 = 4;
 /// Whether a failed commit is worth retrying in-sink: transport flakes and
 /// contention/server-side statuses. Other rejections (auth, bad request)
 /// and encode failures propagate immediately.
-fn transient(error: &HfSinkError) -> bool {
+fn transient<E: error::Error + Send + Sync + 'static>(error: &HfSinkError<E>) -> bool {
     match error {
         HfSinkError::Transport(_) => true,
         HfSinkError::Rejected { status, .. } => {
@@ -193,15 +194,16 @@ fn transient(error: &HfSinkError) -> bool {
     }
 }
 
-/// Terminal sink: encodes each ingested window to parquet and commits it to
-/// a `HuggingFace` dataset repo at a deterministic, Hive-style path:
+/// Terminal sink: encodes each ingested window with its [`Encoder`]
+/// (parquet by default) and commits it to a `HuggingFace` dataset repo at
+/// a deterministic, Hive-style path:
 ///
 /// ```text
-/// data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{fnv1a64(content)}.parquet
+/// data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{fnv1a64(content)}.{E::EXT}
 /// ```
 ///
 /// The path is keyed by the full window start *and* a fingerprint of the
-/// encoded parquet bytes:
+/// encoded bytes:
 ///
 /// - Replaying a window (crash after upload but before the spool segment
 ///   was deleted) re-encodes the same records to the same bytes and
@@ -219,12 +221,13 @@ fn transient(error: &HfSinkError) -> bool {
 /// (or replays them on the next start).
 ///
 /// [`Tier`]: crate::Tier
-pub struct HfSink<R> {
+pub struct HfSink<R, E = ParquetEncoder> {
     client: reqwest::Client,
     repo: String,
     branch: String,
     token: String,
     gate: Option<CommitGate>,
+    encoder: E,
     _record: PhantomData<fn(R)>,
 }
 
@@ -240,10 +243,13 @@ impl<R> HfSink<R> {
             branch: "main".to_owned(),
             token: token.into(),
             gate: None,
+            encoder: ParquetEncoder,
             _record: PhantomData,
         }
     }
+}
 
+impl<R, E: Encoder> HfSink<R, E> {
     #[must_use]
     pub fn branch(mut self, branch: impl Into<String>) -> Self {
         self.branch = branch.into();
@@ -258,8 +264,30 @@ impl<R> HfSink<R> {
         self
     }
 
+    /// Swap the wire format this sink ships (parquet by default):
+    ///
+    /// ```
+    /// use meathook::{HfSink, JsonEncoder};
+    ///
+    /// let sink = HfSink::<()>::new(reqwest::Client::new(), "you/repo", "hf_token")
+    ///     .encoder(JsonEncoder);
+    /// # let _ = sink;
+    /// ```
+    #[must_use]
+    pub fn encoder<E2: Encoder>(self, encoder: E2) -> HfSink<R, E2> {
+        HfSink {
+            client: self.client,
+            repo: self.repo,
+            branch: self.branch,
+            token: self.token,
+            gate: self.gate,
+            encoder,
+            _record: PhantomData,
+        }
+    }
+
     /// One gated send attempt, with a rejection mapped into a typed error.
-    async fn commit(&self, action: CommitAction) -> Result<CommitResponse, HfSinkError> {
+    async fn commit(&self, action: CommitAction) -> Result<CommitResponse, HfSinkError<E::Error>> {
         // The gate's semaphore is never closed, so acquire cannot fail;
         // falling back to an ungated send keeps that invariant harmless.
         let _permit = match &self.gate {
@@ -283,16 +311,16 @@ fn fingerprint(bytes: &[u8]) -> u64 {
     })
 }
 
-/// Keyed by the full window start plus a fingerprint of the parquet
+/// Keyed by the full window start plus a fingerprint of the encoded
 /// bytes. The start (to the second) identifies the window — distinct
 /// windows get distinct paths no matter their content; the fingerprint
 /// separates repeated drains of one window — paths only ever collide when
 /// window *and* content match, and then overwriting is a no-op (see
 /// [`HfSink`] docs).
-fn object_path(meta: &WindowMeta, content: &[u8]) -> String {
+fn object_path(meta: &WindowMeta, content: &[u8], ext: &str) -> String {
     let date = meta.start.date();
     format!(
-        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}-{:02}-{:016x}.parquet",
+        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}-{:02}-{:016x}.{}",
         meta.pipeline,
         date.year(),
         u8::from(date.month()),
@@ -301,21 +329,23 @@ fn object_path(meta: &WindowMeta, content: &[u8]) -> String {
         meta.start.minute(),
         meta.start.second(),
         fingerprint(content),
+        ext,
     )
 }
 
-impl<R> Sink<R> for HfSink<R>
+impl<R, E> Sink<R> for HfSink<R, E>
 where
     R: Serialize + de::DeserializeOwned + Send + 'static,
+    E: Encoder,
 {
-    type Error = HfSinkError;
+    type Error = HfSinkError<E::Error>;
 
     async fn ingest(&mut self, meta: &WindowMeta, records: Vec<R>) -> Result<(), Self::Error> {
         if records.is_empty() {
             return Ok(());
         }
-        let content = encode::to_parquet(&records)?;
-        let path_in_repo = object_path(meta, &content);
+        let content = self.encoder.encode(&records).map_err(HfSinkError::Encode)?;
+        let path_in_repo = object_path(meta, &content, E::EXT);
         let action = CommitAction {
             repo: self.repo.clone(),
             branch: self.branch.clone(),
@@ -365,8 +395,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use time::macros::datetime;
+
+    use super::*;
+    use crate::encode::JsonEncoder;
 
     fn action() -> CommitAction {
         CommitAction {
@@ -459,7 +491,7 @@ mod tests {
             end: datetime!(2026-06-12 09:00 UTC),
         };
         assert_eq!(
-            object_path(&meta, b"PARQUET"),
+            object_path(&meta, b"PARQUET", ParquetEncoder::EXT),
             "data/air_temperature/2026-06-12/08-00-00-abe4fb8a17f5800b.parquet"
         );
     }
@@ -472,13 +504,21 @@ mod tests {
             end: start + Duration::from_secs(30),
         };
         assert_eq!(
-            object_path(&at(datetime!(2026-07-02 13:20 UTC)), b"PARQUET"),
+            object_path(
+                &at(datetime!(2026-07-02 13:20 UTC)),
+                b"PARQUET",
+                ParquetEncoder::EXT
+            ),
             "data/pm25/2026-07-02/13-20-00-abe4fb8a17f5800b.parquet"
         );
         // Two 30s windows in the same minute with identical payloads:
         // the seconds field keeps their files apart.
         assert_eq!(
-            object_path(&at(datetime!(2026-07-02 13:20:30 UTC)), b"PARQUET"),
+            object_path(
+                &at(datetime!(2026-07-02 13:20:30 UTC)),
+                b"PARQUET",
+                ParquetEncoder::EXT
+            ),
             "data/pm25/2026-07-02/13-20-30-abe4fb8a17f5800b.parquet"
         );
     }
@@ -493,21 +533,23 @@ mod tests {
             start: datetime!(2026-07-02 13:20 UTC),
             end: datetime!(2026-07-02 13:30 UTC),
         };
-        let first = object_path(&meta, b"chunk-1");
-        let second = object_path(&meta, b"chunk-2");
+        let first = object_path(&meta, b"chunk-1", ParquetEncoder::EXT);
+        let second = object_path(&meta, b"chunk-2", ParquetEncoder::EXT);
         assert_ne!(first, second);
         assert_eq!(
             first,
             "data/rainfall/2026-07-02/13-20-00-e58fad5f76c7ba24.parquet"
         );
-        assert_eq!(object_path(&meta, b"chunk-1"), first);
+        assert_eq!(object_path(&meta, b"chunk-1", ParquetEncoder::EXT), first);
     }
 
     #[test]
     fn transient_classifies_retryable_failures() {
-        let rejected = |status: http::StatusCode| HfSinkError::Rejected {
-            status,
-            body: String::new(),
+        let rejected = |status: http::StatusCode| -> HfSinkError {
+            HfSinkError::Rejected {
+                status,
+                body: String::new(),
+            }
         };
         assert!(transient(&rejected(http::StatusCode::TOO_MANY_REQUESTS)));
         assert!(transient(&rejected(
@@ -516,5 +558,33 @@ mod tests {
         assert!(transient(&rejected(http::StatusCode::SERVICE_UNAVAILABLE)));
         assert!(!transient(&rejected(http::StatusCode::UNAUTHORIZED)));
         assert!(!transient(&rejected(http::StatusCode::BAD_REQUEST)));
+    }
+
+    #[test]
+    fn json_encoder_swaps_extension_and_body() {
+        let records = vec![serde_json::json!({"station_id": "S100", "value": 29.4})];
+        let content = JsonEncoder.encode(&records).unwrap();
+        let meta = WindowMeta {
+            pipeline: "pm25".into(),
+            start: datetime!(2026-06-12 08:00 UTC),
+            end: datetime!(2026-06-12 09:00 UTC),
+        };
+        let path = object_path(&meta, &content, JsonEncoder::EXT);
+        assert!(path.starts_with("data/pm25/2026-06-12/08-00-00-"));
+        assert_eq!(
+            std::path::Path::new(&path)
+                .extension()
+                .and_then(std::ffi::OsStr::to_str),
+            Some("json")
+        );
+        let parsed: serde_json::Value = serde_json::from_slice(&content).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!([{"station_id": "S100", "value": 29.4}])
+        );
+        // Builder swaps the type param — compile-level proof of pluggability.
+        let _sink =
+            HfSink::<serde_json::Value>::new(reqwest::Client::new(), "you/repo", "hf_token")
+                .encoder(JsonEncoder);
     }
 }
