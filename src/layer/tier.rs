@@ -63,13 +63,21 @@ where
 /// [`WindowMeta`] reconstructed from the window key alone — replayed
 /// windows land at the same storage path (idempotent).
 pub struct Tier<R, St, S> {
+    /// Backend that persists buffered records by aligned window key.
     store: St,
+    /// Policy that defines the window duration and record-count flush threshold.
     policy: FlushPolicy,
+    /// Downstream sink that receives drained windows.
     inner: S,
+    /// Pipeline name attached to drained window metadata.
     pipeline: Option<String>,
+    /// Whether the one-time startup replay has been attempted.
     initialized: bool,
+    /// Aligned Unix timestamp identifying the window currently accepting records.
     active_window: Option<i64>,
+    /// Number of records appended to the active window since it was opened.
     active_count: usize,
+    /// Associates the tier with its record type without storing a record.
     _record: PhantomData<fn() -> R>,
 }
 
@@ -292,7 +300,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::layer::SinkExt;
     use crate::store::MemStore;
     use crate::test_util::{SharedSink, TestSinkFailure, meta_at};
 
@@ -325,9 +332,10 @@ mod tests {
     #[tokio::test]
     async fn mem_tier_holds_until_max_records() {
         let inner = SharedSink::new();
-        let mut sink = inner.clone().tier(
+        let mut sink = Tier::new(
             MemStore::new(),
             FlushPolicy::new(Duration::from_secs(3600), 3),
+            inner.clone(),
         );
 
         sink.ingest(&meta_at("p", 10), vec![1, 2]).await.unwrap();
@@ -342,9 +350,11 @@ mod tests {
     #[tokio::test]
     async fn time_unbounded_policy_drains_on_record_count() {
         let inner = SharedSink::new();
-        let mut sink = inner
-            .clone()
-            .tier(MemStore::new(), FlushPolicy::new(Duration::MAX, 2));
+        let mut sink = Tier::new(
+            MemStore::new(),
+            FlushPolicy::new(Duration::MAX, 2),
+            inner.clone(),
+        );
 
         // All records land in the single epoch-anchored window; only the
         // record cap can fire. Draining must not panic computing the
@@ -370,9 +380,10 @@ mod tests {
     #[tokio::test]
     async fn mem_tier_drains_closed_window_on_next_ingest() {
         let inner = SharedSink::new();
-        let mut sink = inner.clone().tier(
+        let mut sink = Tier::new(
             MemStore::new(),
             FlushPolicy::every(Duration::from_secs(300)),
+            inner.clone(),
         );
 
         sink.ingest(&meta_at("p", 10), vec![1]).await.unwrap();
@@ -392,9 +403,10 @@ mod tests {
     #[tokio::test]
     async fn mem_tier_retains_records_across_failing_downstream() {
         let inner = SharedSink::new();
-        let mut sink = inner.clone().tier(
+        let mut sink = Tier::new(
             MemStore::new(),
             FlushPolicy::new(Duration::from_secs(3600), 2),
+            inner.clone(),
         );
 
         inner.set_fail(true);
@@ -411,10 +423,11 @@ mod tests {
     #[tokio::test]
     async fn flush_drains_the_whole_stack() {
         let bottom = SharedSink::new();
-        let mut sink = bottom
-            .clone()
-            .tier(MemStore::new(), FlushPolicy::hourly())
-            .tier(MemStore::new(), FlushPolicy::hourly());
+        let mut sink = Tier::new(
+            MemStore::new(),
+            FlushPolicy::hourly(),
+            Tier::new(MemStore::new(), FlushPolicy::hourly(), bottom.clone()),
+        );
 
         sink.ingest(&meta_at("p", 10), vec![1, 2, 3]).await.unwrap();
         assert!(bottom.batches().is_empty());
@@ -428,13 +441,13 @@ mod tests {
     async fn poison_window_does_not_block_newer_windows() {
         let inner = SharedSink::new();
         let armed = Arc::new(AtomicBool::new(true));
-        let mut sink = PoisonSink {
-            inner: inner.clone(),
-            armed: Arc::clone(&armed),
-        }
-        .tier(
+        let mut sink = Tier::new(
             MemStore::new(),
             FlushPolicy::every(Duration::from_secs(300)),
+            PoisonSink {
+                inner: inner.clone(),
+                armed: Arc::clone(&armed),
+            },
         );
 
         // Window 0 gets the poison record; it closes on the next tick.
@@ -465,9 +478,10 @@ mod tests {
     #[tokio::test]
     async fn outage_retains_all_windows_and_recovers_in_order() {
         let inner = SharedSink::new();
-        let mut sink = inner.clone().tier(
+        let mut sink = Tier::new(
             MemStore::new(),
             FlushPolicy::every(Duration::from_secs(300)),
+            inner.clone(),
         );
 
         sink.ingest(&meta_at("p", 10), vec![1]).await.unwrap();

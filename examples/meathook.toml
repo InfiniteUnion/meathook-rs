@@ -5,7 +5,7 @@
 
 spool_dir = "./spool-test" # PVC mount on k8s
 
-[flush] # FlushPolicy for each pipeline's spool tier
+[flush] # FlushPolicy for each pipeline's durable JSONL tier
 every = "10m"
 max_records = 50_000
 

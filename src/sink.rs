@@ -21,10 +21,9 @@ pub struct WindowMeta {
 
 /// A destination for records.
 ///
-/// Sinks compose like tower layers: a buffering layer may hold records until
-/// its flush policy fires, a durable layer appends them to disk, and a
-/// terminal sink ships them to long-term storage. See
-/// [`SinkExt`](crate::SinkExt) for the combinators.
+/// Build buffering and durable layers in record-entry order with
+/// [`SinkStack`](crate::SinkStack), then finish with a terminal sink. Fan out
+/// completed sinks with [`SinkExt::tee`](crate::SinkExt::tee).
 pub trait Sink<R>: Send {
     /// Concrete error type (a `thiserror` enum, not a boxed error).
     type Error: error::Error + Send + Sync + 'static;

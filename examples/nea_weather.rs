@@ -1,10 +1,11 @@
 //! Reference meathook consumer: collects NEA (data.gov.sg) realtime weather
-//! readings and ships hourly parquet windows to a `HuggingFace` dataset repo.
+//! readings and ships configured parquet windows to a `HuggingFace` dataset.
 //!
-//! Each pipeline's stack is `Tier(JsonlStore) → HfSink`: every tick is
-//! appended to an fsynced JSONL segment before the ingest returns
-//! (write-ahead), and the tier flushes a parquet file per window to HF.
-//! Leftover segments from a crash replay on the next start.
+//! Each pipeline's stack is `Tier(MemStore) → Tier(JsonlStore) → HfSink`.
+//! The outer memory tier batches for five minutes or 10,000 records; its
+//! batches are then appended to an fsynced JSONL segment, and the configured
+//! durable tier flushes windows to HF. Records still held in memory remain
+//! volatile; leftover JSONL segments replay on the next start.
 //!
 //! ```bash
 //! HF_TOKEN=hf_... cargo run --example nea_weather -- examples/meathook.toml
@@ -16,8 +17,8 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use meathook::{
-    CommitGate, FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector, SinkExt as _,
-    Tier,
+    CommitGate, FlushPolicy, HfSink, JsonlStore, Meathook, MemStore, Pipeline, SatayCollector,
+    SinkStack, Tier,
 };
 use nea_rs::{
     AirTemperatureOperationResponse, NeaReadingSnapshot, NeaWeatherStation, Pm25OperationResponse,
@@ -28,6 +29,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use tracing::warn;
+
+const MEMORY_FLUSH_POLICY: FlushPolicy = FlushPolicy::new(Duration::from_secs(300), 10_000);
+
+type WeatherSink<R> = Tier<R, MemStore<R>, Tier<R, JsonlStore<R>, HfSink<R>>>;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -146,15 +151,19 @@ impl Ctx {
         }
     }
 
-    /// Terminal HF sink behind a per-pipeline durable spool tier.
-    fn tiered_hf<R>(&self, pipeline: &str) -> Tier<R, JsonlStore<R>, HfSink<R>>
+    /// In-memory batching, durable spool, then the terminal HF sink.
+    fn tiered_hf<R>(&self, pipeline: &str) -> WeatherSink<R>
     where
-        R: Serialize + DeserializeOwned + Send + 'static,
+        R: Clone + Serialize + DeserializeOwned + Send + 'static,
     {
-        HfSink::new(self.client.clone(), self.repo.clone(), self.token.clone())
+        let terminal = HfSink::new(self.client.clone(), self.repo.clone(), self.token.clone())
             .branch(self.branch.clone())
-            .gate(self.gate.clone())
+            .gate(self.gate.clone());
+
+        SinkStack::new()
+            .tier(MemStore::new(), MEMORY_FLUSH_POLICY)
             .tier(JsonlStore::new(self.spool_dir.join(pipeline)), self.policy)
+            .terminal(terminal)
     }
 }
 

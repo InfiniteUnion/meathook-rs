@@ -5,7 +5,7 @@ const code = `use std::{time::Duration, env};
 
 use meathook::{
     FlushPolicy, HfSink, JsonEncoder, JsonlStore, Meathook, MemStore,
-    Pipeline, SatayCollector, SinkExt as _,
+    Pipeline, SatayCollector, SinkStack,
 };
 use satay_reqwest::ReqwestActionExt as _;
 use reqwest::Client;
@@ -28,17 +28,21 @@ async fn main() -> Result<(), meathook::runtime::RuntimeError> {
                 |response| flatten(response),
             );
 
-            // Format and storage are independent choices. The outer memory
-            // tier batches for five minutes; the durable tier flushes hourly.
-            let sink = HfSink::new(client.clone(), "you/your-dataset", token.clone())
-                .encoder(JsonEncoder)
+            // Declaration order is record flow: memory batches for five minutes
+            // or 10k records, JSONL fsyncs each batch and forwards hourly, then
+            // the terminal uploads it. Disk is reached only when memory fires.
+            let sink = SinkStack::new()
+                .tier(
+                    MemStore::new(),
+                    FlushPolicy::new(Duration::from_secs(300), 10_000),
+                )
                 .tier(
                     JsonlStore::new("/var/lib/meathook/spool/air_temperature"),
                     FlushPolicy::hourly(),
                 )
-                .tier(
-                    MemStore::new(),
-                    FlushPolicy::new(Duration::from_secs(300), 10_000),
+                .terminal(
+                    HfSink::new(client.clone(), "you/your-dataset", token.clone())
+                        .encoder(JsonEncoder),
                 );
 
             Pipeline::new(collector, sink, Duration::from_secs(60))
@@ -60,8 +64,11 @@ const lines = highlighted.split('\n');
     <p class="mt-6 max-w-[44rem] text-lg leading-relaxed text-ink-dim">
       Implement <code class="font-mono text-sm text-ink">Store&lt;R&gt;</code>,
       <code class="font-mono text-sm text-ink">Encoder</code>, or
-      <code class="font-mono text-sm text-ink">Sink&lt;R&gt;</code>. Compose them
-      with <code class="font-mono text-sm text-ink">.tier()</code> and
+      <code class="font-mono text-sm text-ink">Sink&lt;R&gt;</code>.
+      Start with <code class="font-mono text-sm text-ink">SinkStack::new()</code>,
+      add tiers in record-flow order, then finish with
+      <code class="font-mono text-sm text-ink">.terminal()</code>. Configure
+      formats directly on the terminal with
       <code class="font-mono text-sm text-ink">.encoder()</code>.
     </p>
 

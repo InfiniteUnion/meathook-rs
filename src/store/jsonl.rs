@@ -1,10 +1,13 @@
 //! [`JsonlStore`]: durable write-ahead segment files (JSON lines).
 //!
 //! The **disk is the buffer**: `append` writes records as JSON lines to the
-//! window's segment file and fsyncs before returning, so once a tick's
-//! ingest returns those records survive `SIGKILL`. `commit` deletes the
-//! segment only after the tier's downstream sink accepted it — a failed
-//! downstream leaves the segment in place to be retried at the next firing.
+//! window's segment file and fsyncs before returning. Once an ingest reaches
+//! the JSONL-backed [`Tier`](crate::Tier) and returns, those records survive
+//! `SIGKILL`; records still held by an outer tier have not reached disk.
+//! `commit` deletes the segment only after the downstream sink accepts it, so
+//! a failed downstream leaves the segment in place for the next firing. If a
+//! volatile downstream tier accepts the records, durable custody ends before
+//! terminal delivery.
 //!
 //! On-disk layout (one directory per pipeline):
 //!
@@ -264,7 +267,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::layer::{FlushPolicy, SinkExt};
+    use crate::layer::{FlushPolicy, Tier};
     use crate::sink::Sink;
     use crate::test_util::{SharedSink, meta_at};
 
@@ -277,7 +280,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store_dir = dir.path().join("p");
         let inner = SharedSink::new();
-        let mut tier = inner.clone().tier(JsonlStore::new(&store_dir), policy());
+        let mut tier = Tier::new(JsonlStore::new(&store_dir), policy(), inner.clone());
 
         tier.ingest(&meta_at("p", 10), vec![1, 2]).await.unwrap();
         tier.ingest(&meta_at("p", 20), vec![3]).await.unwrap();
@@ -300,9 +303,7 @@ mod tests {
         fs::write(store_dir.join("7200.jsonl"), "3\n").unwrap();
 
         let inner = SharedSink::new();
-        let mut tier = inner
-            .clone()
-            .tier(JsonlStore::<i32>::new(&store_dir), policy());
+        let mut tier = Tier::new(JsonlStore::<i32>::new(&store_dir), policy(), inner.clone());
         tier.flush().await.unwrap();
 
         let batches = inner.batches();
@@ -326,9 +327,7 @@ mod tests {
         fs::write(store_dir.join("3600.jsonl"), "1\n2\n{\"trunc").unwrap();
 
         let inner = SharedSink::new();
-        let mut tier = inner
-            .clone()
-            .tier(JsonlStore::<i32>::new(&store_dir), policy());
+        let mut tier = Tier::new(JsonlStore::<i32>::new(&store_dir), policy(), inner.clone());
         tier.flush().await.unwrap();
 
         assert_eq!(inner.batches()[0].1, vec![1, 2]);
@@ -340,7 +339,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store_dir = dir.path().join("p");
         let inner = SharedSink::new();
-        let mut tier = inner.clone().tier(JsonlStore::new(&store_dir), policy());
+        let mut tier = Tier::new(JsonlStore::new(&store_dir), policy(), inner.clone());
 
         tier.ingest(&meta_at("p", 10), vec![1, 2]).await.unwrap();
 
@@ -360,9 +359,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store_dir = dir.path().join("p");
         let inner = SharedSink::new();
-        let mut tier = inner.clone().tier(
+        let mut tier = Tier::new(
             JsonlStore::new(&store_dir),
             FlushPolicy::new(Duration::from_secs(3600), 3),
+            inner.clone(),
         );
 
         tier.ingest(&meta_at("p", 10), vec![1, 2]).await.unwrap();
