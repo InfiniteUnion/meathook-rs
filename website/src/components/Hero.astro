@@ -335,12 +335,13 @@ const terminals = [
         const li = document.createElement('li');
         li.className = 'record is-ambient';
         const inner =
-          `<span class="record-dim">{</span> ` +
-          `"k":"<span class="record-key">${t.k}</span>"<span class="record-dim">,</span> ` +
-          `"v":<span class="record-val">${t.v}</span><span class="record-dim">,</span> ` +
-          (t.st ? `"st":"<span class="record-st">${t.st}</span>"<span class="record-dim">,</span> ` : '') +
-          (t.rg ? `"rg":"<span class="record-st">${t.rg}</span>"<span class="record-dim">,</span> ` : '') +
-          `"ts":"<span class="record-ts">${t.ts}</span>" <span class="record-dim">}</span>`;
+          `<span class="record-dim">{</span>` +
+          `"k":"<span class="record-key">${t.k}</span>"<span class="record-dim">,</span>` +
+          `"v":<span class="record-val">${t.v}</span><span class="record-dim">,</span>` +
+          (t.st ? `"st":"<span class="record-st">${t.st}</span>"<span class="record-dim">,</span>` : '') +
+          (t.rg ? `"rg":"<span class="record-st">${t.rg}</span>"<span class="record-dim">,</span>` : '') +
+          `"ts":"<span class="record-ts">${t.ts}</span>"` +
+          `<span class="record-dim">}</span>`;
         li.innerHTML = inner;
         recordsEl.appendChild(li);
         // keep the list at a fixed size — trim oldest as new ones arrive
