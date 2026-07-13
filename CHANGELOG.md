@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in, type-level zstd parquet compression through
+  `ParquetEncoder<Zstd<LEVEL>>`, with `LEVEL` restricted at compile time to
+  `1..=22`. `Zstd` defaults to level 1 and `HfSink` remains uncompressed by
+  default.
+
+### Changed
+
+- **Breaking:** `ParquetEncoder` is now generic over a sealed
+  `ParquetCompression` policy and is no longer a unit value. Migrate
+  `ParquetEncoder.encode(&records)` to
+  `ParquetEncoder::default().encode(&records)` for the previous uncompressed
+  behavior.
+- Changing compression changes the encoded-byte fingerprint in Hugging Face
+  object paths. Drain pending JSONL spool segments before changing compression
+  if replaying the same logical rows to a second path would be unacceptable.
+
 ## [0.3.0](https://github.com/InfiniteUnion/meathook-rs/compare/v0.2.0...v0.3.0) - 2026-07-12
 
 ### Added

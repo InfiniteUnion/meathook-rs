@@ -149,6 +149,14 @@ Replaying a window produces the same bytes and overwrites the same file.
 Different payloads do not collide, including sub-hourly windows and windows
 split into chunks by `max_records`.
 
+The compression setting is therefore part of replay identity. Before changing
+an existing deployment from uncompressed parquet to zstd (or changing zstd
+levels), drain its JSONL spool if duplicate rows are unacceptable. A segment
+uploaded before a crash but replayed afterward with different compression has
+the same logical records but different bytes, so it lands at a new content-hash
+path. Existing uncompressed files remain valid and can coexist with new zstd
+files.
+
 The position of `JsonlStore` matters. Its protection starts when a batch
 reaches that tier and ends when the downstream sink accepts it. An outer
 `MemStore` reduces fsync traffic but leaves its current window in memory. A
@@ -180,6 +188,26 @@ default, `JsonEncoder` is always available, and the `csv` feature adds
 `CsvEncoder`. Files use Hive-style partitions so the Hugging Face dataset
 viewer can read them.
 
+Parquet stays uncompressed by default for compatibility. Compression is part
+of the encoder type: use `Zstd` for level 1, or select a level from 1 through
+22 with `Zstd<LEVEL>`. Values outside that range do not implement the parquet
+compression policy and fail to compile:
+
+```rust
+use meathook::{HfSink, ParquetEncoder, Zstd};
+
+type DatasetParquet = ParquetEncoder<Zstd<3>>;
+
+let sink = HfSink::<MyRecord>::new(client, repo, token)
+    .encoder(DatasetParquet::new());
+
+let uncompressed = ParquetEncoder::default();
+let zstd_level_1 = ParquetEncoder::<Zstd>::new();
+```
+
+Compression is recorded per parquet column and is transparent to the Hugging
+Face dataset viewer and parquet readers.
+
 The sink retries transport errors, HTTP 429 responses, and 5xx responses with
 backoff. If those retries run out, the upstream tier keeps the records and
 tries again when it next flushes.
@@ -195,7 +223,7 @@ forever.
 
 | Feature | Default | Implies | Adds |
 |---|---|---|---|
-| `parquet` | Yes | Nothing | `Encoder` and `ParquetEncoder` using Arrow, Parquet, and serde_arrow |
+| `parquet` | Yes | Nothing | `Encoder` and configurable uncompressed/zstd `ParquetEncoder` using Arrow, Parquet, and serde_arrow |
 | `csv` | No | Nothing | `CsvEncoder` |
 | `satay` | No | Nothing | `SatayCollector` for satay-generated API clients |
 | `huggingface` | Yes | `parquet`, `satay` | `HfSink` and the sans-IO `CommitAction` |
