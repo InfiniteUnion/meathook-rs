@@ -51,6 +51,6 @@ pub use store::{JsonlStore, JsonlStoreError, MemStore, Segment, Store};
 pub use encode::{CsvEncoder, CsvError};
 pub use encode::{Encoder, JsonEncoder};
 #[cfg(feature = "parquet")]
-pub use encode::{ParquetEncodeError, ParquetEncoder};
+pub use encode::{ParquetCompression, ParquetEncodeError, ParquetEncoder, Uncompressed, Zstd};
 #[cfg(feature = "huggingface")]
 pub use sink::huggingface::{CommitGate, HfSink, HfSinkError};

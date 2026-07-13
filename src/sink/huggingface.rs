@@ -243,7 +243,7 @@ impl<R> HfSink<R> {
             branch: "main".to_owned(),
             token: token.into(),
             gate: None,
-            encoder: ParquetEncoder,
+            encoder: ParquetEncoder::default(),
             _record: PhantomData,
         }
     }
@@ -491,7 +491,7 @@ mod tests {
             end: datetime!(2026-06-12 09:00 UTC),
         };
         assert_eq!(
-            object_path(&meta, b"PARQUET", ParquetEncoder::EXT),
+            object_path(&meta, b"PARQUET", <ParquetEncoder as Encoder>::EXT),
             "data/air_temperature/2026-06-12/08-00-00-abe4fb8a17f5800b.parquet"
         );
     }
@@ -507,7 +507,7 @@ mod tests {
             object_path(
                 &at(datetime!(2026-07-02 13:20 UTC)),
                 b"PARQUET",
-                ParquetEncoder::EXT
+                <ParquetEncoder as Encoder>::EXT
             ),
             "data/pm25/2026-07-02/13-20-00-abe4fb8a17f5800b.parquet"
         );
@@ -517,7 +517,7 @@ mod tests {
             object_path(
                 &at(datetime!(2026-07-02 13:20:30 UTC)),
                 b"PARQUET",
-                ParquetEncoder::EXT
+                <ParquetEncoder as Encoder>::EXT
             ),
             "data/pm25/2026-07-02/13-20-30-abe4fb8a17f5800b.parquet"
         );
@@ -533,14 +533,17 @@ mod tests {
             start: datetime!(2026-07-02 13:20 UTC),
             end: datetime!(2026-07-02 13:30 UTC),
         };
-        let first = object_path(&meta, b"chunk-1", ParquetEncoder::EXT);
-        let second = object_path(&meta, b"chunk-2", ParquetEncoder::EXT);
+        let first = object_path(&meta, b"chunk-1", <ParquetEncoder as Encoder>::EXT);
+        let second = object_path(&meta, b"chunk-2", <ParquetEncoder as Encoder>::EXT);
         assert_ne!(first, second);
         assert_eq!(
             first,
             "data/rainfall/2026-07-02/13-20-00-e58fad5f76c7ba24.parquet"
         );
-        assert_eq!(object_path(&meta, b"chunk-1", ParquetEncoder::EXT), first);
+        assert_eq!(
+            object_path(&meta, b"chunk-1", <ParquetEncoder as Encoder>::EXT),
+            first
+        );
     }
 
     #[test]
