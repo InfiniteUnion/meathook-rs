@@ -1,0 +1,28 @@
+# Bucket-sink variant of the example config. Intervals/windows use
+# humantime strings. Secrets come from the environment, never from this
+# file:
+#   HF_TOKEN   - HuggingFace access token with write access to the bucket
+#   X_API_KEY  - optional data.gov.sg API key (these endpoints work keyless)
+#
+# The bucket must exist before the first flush:
+#   hf buckets create zeon256/meathook-test --private
+
+spool_dir = "./spool-test-bucket" # PVC mount on k8s; separate from the
+                                  # dataset example's spool so the two can
+                                  # run side by side
+
+[flush] # FlushPolicy for each pipeline's durable JSONL tier
+every = "10m"
+max_records = 50_000
+
+[sink.bucket]
+id = "zeon256/meathook-test"
+
+[collectors.air_temperature]
+interval = "1m"
+
+[collectors.rainfall]
+interval = "5m"
+
+[collectors.pm25]
+interval = "1h"

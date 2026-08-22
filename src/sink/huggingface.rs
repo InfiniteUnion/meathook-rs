@@ -26,7 +26,7 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::encode::{Encoder, ParquetEncodeError, ParquetEncoder};
-use crate::sink::{Sink, WindowMeta};
+use crate::sink::{Sink, WindowMeta, object_path};
 
 /// Error from the `HuggingFace` sink.
 #[derive(Debug, thiserror::Error)]
@@ -301,38 +301,6 @@ impl<R, E: Encoder> HfSink<R, E> {
     }
 }
 
-/// FNV-1a 64-bit — stable across releases (the fingerprint is load-bearing
-/// for replay idempotency: same bytes must map to the same path forever).
-fn fingerprint(bytes: &[u8]) -> u64 {
-    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0100_0000_01b3;
-    bytes.iter().fold(OFFSET_BASIS, |hash, &byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
-    })
-}
-
-/// Keyed by the full window start plus a fingerprint of the encoded
-/// bytes. The start (to the second) identifies the window — distinct
-/// windows get distinct paths no matter their content; the fingerprint
-/// separates repeated drains of one window — paths only ever collide when
-/// window *and* content match, and then overwriting is a no-op (see
-/// [`HfSink`] docs).
-fn object_path(meta: &WindowMeta, content: &[u8], ext: &str) -> String {
-    let date = meta.start.date();
-    format!(
-        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}-{:02}-{:016x}.{}",
-        meta.pipeline,
-        date.year(),
-        u8::from(date.month()),
-        date.day(),
-        meta.start.hour(),
-        meta.start.minute(),
-        meta.start.second(),
-        fingerprint(content),
-        ext,
-    )
-}
-
 impl<R, E> Sink<R> for HfSink<R, E>
 where
     R: Serialize + de::DeserializeOwned + Send + 'static,
@@ -388,8 +356,8 @@ where
     }
 
     /// No-op: this terminal sink ships every batch as it is ingested.
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        Ok(())
+    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        std::future::ready(Ok(()))
     }
 }
 

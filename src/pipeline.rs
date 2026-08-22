@@ -182,9 +182,11 @@ mod tests {
             "fake"
         }
 
-        async fn collect(&mut self) -> Result<Vec<Self::Record>, Infallible> {
+        fn collect(
+            &mut self,
+        ) -> impl Future<Output = Result<Vec<Self::Record>, Infallible>> + Send {
             let tick = self.ticks.fetch_add(1, Ordering::SeqCst);
-            Ok(vec![(tick, 0), (tick + 1, 0)])
+            std::future::ready(Ok(vec![(tick, 0), (tick + 1, 0)]))
         }
     }
 
@@ -232,13 +234,13 @@ mod tests {
                 "flaky"
             }
 
-            async fn collect(&mut self) -> Result<Vec<usize>, FlakyError> {
+            fn collect(&mut self) -> impl Future<Output = Result<Vec<usize>, FlakyError>> + Send {
                 let call = self.calls.fetch_add(1, Ordering::SeqCst);
-                if call.is_multiple_of(2) {
+                std::future::ready(if call.is_multiple_of(2) {
                     Err(FlakyError)
                 } else {
                     Ok(vec![call])
-                }
+                })
             }
         }
 

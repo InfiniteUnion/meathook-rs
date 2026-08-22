@@ -219,6 +219,40 @@ happens during shutdown, when every pipeline flushes its last window at once.
 Set a request timeout on gated clients so a stalled upload cannot hold the gate
 forever.
 
+## Hugging Face bucket sink
+
+`HfBucketSink` (feature `hf-bucket`) writes windows to a Hugging Face
+storage bucket — `hf://buckets/{namespace}/{bucket}` — instead of a
+dataset repo. Buckets have no git layer: no commit queue, no file-count
+limits, and Xet chunk deduplication across the whole bucket.
+
+```rust,ignore
+let terminal = HfBucketSink::new(client, "you/your-bucket", token)
+    .expect("xet session")?;
+let sink = SinkStack::new()
+    .tier(JsonlStore::new("/var/lib/meathook/spool/air_temperature"), FlushPolicy::hourly())
+    .terminal(terminal);
+```
+
+Each window still lands at the same deterministic path
+(`data/{pipeline}/{date}/{time}-{fingerprint}.parquet`), uploaded through
+Xet and then registered with a single sans-IO `BatchAction`
+(`POST /api/buckets/{bucket}/batch`). The upload leg uses the official
+`hf-xet` crate — the same client `huggingface_hub` uses — so replays of
+identical bytes transfer almost nothing. There is no `CommitGate`
+equivalent: buckets accept writes without a per-repository queue.
+
+The bucket must exist before the first write; create it with
+`CreateBucketAction` (409 decodes to `AlreadyExists`) or `hf buckets
+create you/your-bucket --private`.
+
+[`examples/nea_weather_bucket.rs`](examples/nea_weather_bucket.rs) runs
+the same three NEA pipelines as the dataset example, sharing collectors,
+records, and config plumbing through `examples/common/mod.rs` — only the
+terminal sink and its config differ. Build it with
+`cargo run --features hf-bucket --example nea_weather_bucket --
+examples/meathook_bucket.toml`.
+
 ## Feature flags
 
 | Feature | Default | Implies | Adds |
@@ -227,6 +261,7 @@ forever.
 | `csv` | No | Nothing | `CsvEncoder` |
 | `satay` | No | Nothing | `SatayCollector` for satay-generated API clients |
 | `huggingface` | Yes | `parquet`, `satay` | `HfSink` and the sans-IO `CommitAction` |
+| `hf-bucket` | No | `huggingface` | `HfBucketSink` for [storage buckets](https://huggingface.co/storage), plus `CreateBucketAction`. Requires Rust 1.89+: the transitive `redb` dependency of `hf-xet` declares MSRV 1.89 |
 
 With `--no-default-features`, the crate still provides the core traits, sink
 combinators, JSONL spool, supervisor, `Encoder`, and `JsonEncoder`. The Satay
@@ -293,6 +328,11 @@ cargo test                       # Timing, spool recovery, Parquet round trips,
 
 HF_TOKEN=hf_... MEATHOOK_TEST_REPO=you/meathook-test \
     cargo test --test hf_integration -- --ignored   # Commit to a scratch repository.
+
+HF_TOKEN=hf_... MEATHOOK_TEST_BUCKET=you/meathook-test \
+    cargo test --features hf-bucket --test hf_bucket_integration -- --ignored
+                                 # Write to a scratch storage bucket (created
+                                 # if missing; delete with `hf buckets delete`).
 ```
 
 ## Security

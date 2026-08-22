@@ -260,10 +260,10 @@ mod tests {
             "panics-once"
         }
 
-        async fn collect(&mut self) -> Result<Vec<usize>, Infallible> {
+        fn collect(&mut self) -> impl Future<Output = Result<Vec<usize>, Infallible>> + Send {
             let call = self.global_calls.fetch_add(1, Ordering::SeqCst);
             assert!(call != 0, "boom");
-            Ok(vec![call])
+            std::future::ready(Ok(vec![call]))
         }
     }
 

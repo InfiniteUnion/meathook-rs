@@ -5,6 +5,9 @@ use std::future::Future;
 
 use time::OffsetDateTime;
 
+#[cfg(feature = "hf-bucket")]
+pub mod hf_bucket;
+
 #[cfg(feature = "huggingface")]
 pub mod huggingface;
 
@@ -39,4 +42,38 @@ pub trait Sink<R>: Send {
     /// Force-drain this layer and everything downstream (shutdown, final
     /// flush, startup recovery).
     fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// FNV-1a 64-bit — stable across releases (the fingerprint is load-bearing
+/// for replay idempotency: same bytes must map to the same path forever).
+pub(crate) fn fingerprint(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+    bytes.iter().fold(OFFSET_BASIS, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    })
+}
+
+/// Object path keyed by the full window start plus a fingerprint of the
+/// encoded bytes. The start (to the second) identifies the window — distinct
+/// windows get distinct paths no matter their content; the fingerprint
+/// separates repeated drains of one window — paths only ever collide when
+/// window *and* content match, and then overwriting is a no-op (see
+/// [`HfSink`] docs; bucket sinks share the same contract).
+///
+/// [`HfSink`]: crate::sink::huggingface::HfSink
+pub(crate) fn object_path(meta: &WindowMeta, content: &[u8], ext: &str) -> String {
+    let date = meta.start.date();
+    format!(
+        "data/{}/{:04}-{:02}-{:02}/{:02}-{:02}-{:02}-{:016x}.{}",
+        meta.pipeline,
+        date.year(),
+        u8::from(date.month()),
+        date.day(),
+        meta.start.hour(),
+        meta.start.minute(),
+        meta.start.second(),
+        fingerprint(content),
+        ext,
+    )
 }

@@ -1,5 +1,6 @@
 //! Reference meathook consumer: collects NEA (data.gov.sg) realtime weather
-//! readings and ships configured parquet windows to a `HuggingFace` dataset.
+//! readings and ships configured parquet windows to a `HuggingFace` dataset
+//! repo.
 //!
 //! Each pipeline's stack is `Tier(MemStore) → Tier(JsonlStore) → HfSink`.
 //! The outer memory tier batches for five minutes or 10,000 records; its
@@ -7,48 +8,22 @@
 //! durable tier flushes windows to HF. Records still held in memory remain
 //! volatile; leftover JSONL segments replay on the next start.
 //!
+//! Collectors, records, and config plumbing are shared with the bucket
+//! variant in `examples/nea_weather_bucket.rs` via `examples/common/mod.rs`.
+//!
 //! ```bash
 //! HF_TOKEN=hf_... cargo run --example nea_weather -- examples/meathook.toml
 //! ```
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::Duration;
+#[path = "common/mod.rs"]
+mod common;
 
-use anyhow::Context as _;
-use meathook::{
-    CommitGate, FlushPolicy, HfSink, JsonlStore, Meathook, MemStore, Pipeline, SatayCollector,
-    SinkStack, Tier,
+use common::{
+    Config, Ctx, air_temperature_collector, init_tracing, load_config, pm25_collector,
+    rainfall_collector,
 };
-use nea_rs::{
-    AirTemperatureOperationResponse, NeaReadingSnapshot, NeaWeatherStation, Pm25OperationResponse,
-    RainfallOperationResponse,
-};
-use satay_reqwest::ReqwestActionExt as _;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
-use tracing::warn;
-
-const MEMORY_FLUSH_POLICY: FlushPolicy = FlushPolicy::new(Duration::from_secs(300), 10_000);
-
-type WeatherSink<R> = Tier<R, MemStore<R>, Tier<R, JsonlStore<R>, HfSink<R>>>;
-
-#[derive(Debug, Deserialize)]
-struct Config {
-    spool_dir: PathBuf,
-    flush: FlushConfig,
-    sink: SinkConfig,
-    #[serde(default)]
-    collectors: HashMap<String, CollectorConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FlushConfig {
-    #[serde(with = "humantime_serde")]
-    every: Duration,
-    max_records: usize,
-}
+use meathook::{CommitGate, HfSink, Meathook, Pipeline};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct SinkConfig {
@@ -66,194 +41,33 @@ fn default_branch() -> String {
     "main".to_owned()
 }
 
-#[derive(Debug, Deserialize)]
-struct CollectorConfig {
-    #[serde(with = "humantime_serde")]
-    interval: Duration,
-}
-
-impl Config {
-    fn interval(&self, collector: &str) -> Duration {
-        self.collectors
-            .get(collector)
-            .map_or(Duration::from_secs(60), |c| c.interval)
-    }
-}
-
-/// One station reading, flattened row-shape for parquet.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StationReading {
-    station_id: String,
-    station_name: String,
-    timestamp: String,
-    value: f64,
-}
-
-/// One regional PM2.5 reading.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RegionReading {
-    region: String,
-    timestamp: String,
-    value: f64,
-}
-
-fn fmt_ts(ts: time::OffsetDateTime) -> String {
-    ts.format(&Rfc3339).unwrap_or_else(|_| ts.to_string())
-}
-
-fn flatten_station_data(
-    stations: &[NeaWeatherStation],
-    readings: &[NeaReadingSnapshot],
-) -> Vec<StationReading> {
-    let names: HashMap<String, &str> = stations
-        .iter()
-        .map(|s| (s.id.to_string(), s.name.as_str()))
-        .collect();
-    let names = &names;
-    readings
-        .iter()
-        .flat_map(|snapshot| {
-            let timestamp = fmt_ts(snapshot.timestamp);
-            snapshot.data.iter().map(move |reading| {
-                let station_id = reading.station_id.to_string();
-                StationReading {
-                    station_name: names.get(&station_id).copied().unwrap_or("").to_owned(),
-                    station_id,
-                    timestamp: timestamp.clone(),
-                    value: reading.value,
-                }
-            })
-        })
-        .collect()
-}
-
-/// Shared wiring context cloned into every pipeline factory.
+/// Terminal-sink wiring specific to the dataset example.
 #[derive(Clone)]
-struct Ctx {
-    client: reqwest::Client,
-    api_key: Option<String>,
+struct SinkCtx {
     repo: String,
     branch: String,
-    token: String,
-    spool_dir: PathBuf,
-    policy: FlushPolicy,
     /// Shared by every pipeline's sink: commits to the one HF repo go out
     /// one at a time instead of racing into HF's per-repo commit queue.
     gate: CommitGate,
 }
 
-impl Ctx {
-    fn api(&self) -> nea_rs::Api {
-        let api = nea_rs::Api::new();
-        match &self.api_key {
-            Some(key) => api.x_api_key(key.clone()),
-            None => api,
+impl SinkCtx {
+    fn from_config(config: &Config<SinkConfig>) -> Self {
+        Self {
+            repo: config.sink.huggingface.repo.clone(),
+            branch: config.sink.huggingface.branch.clone(),
+            gate: CommitGate::new(),
         }
     }
 
-    /// In-memory batching, durable spool, then the terminal HF sink.
-    fn tiered_hf<R>(&self, pipeline: &str) -> WeatherSink<R>
+    fn tiered<R>(&self, ctx: &Ctx, pipeline: &str) -> common::TieredStack<R, HfSink<R>>
     where
-        R: Clone + Serialize + DeserializeOwned + Send + 'static,
+        R: Clone + serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     {
-        let terminal = HfSink::new(self.client.clone(), self.repo.clone(), self.token.clone())
+        let terminal = HfSink::new(ctx.client.clone(), self.repo.clone(), ctx.token.clone())
             .branch(self.branch.clone())
             .gate(self.gate.clone());
-
-        SinkStack::new()
-            .tier(MemStore::new(), MEMORY_FLUSH_POLICY)
-            .tier(JsonlStore::new(self.spool_dir.join(pipeline)), self.policy)
-            .terminal(terminal)
-    }
-}
-
-fn init_tracing() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,meathook=debug".into()),
-        )
-        .init();
-}
-
-fn load_config(config_path: &str) -> anyhow::Result<Config> {
-    toml::from_str(
-        &std::fs::read_to_string(config_path)
-            .with_context(|| format!("reading config {config_path}"))?,
-    )
-    .with_context(|| format!("parsing config {config_path}"))
-}
-
-fn ctx_from_config(config: &Config) -> anyhow::Result<Ctx> {
-    Ok(Ctx {
-        // The timeout matters beyond hygiene: a stalled HF upload holds the
-        // commit gate's permit, blocking every other pipeline's commit
-        // until this one is abandoned.
-        client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .context("building http client")?,
-        api_key: std::env::var("X_API_KEY").ok(),
-        repo: config.sink.huggingface.repo.clone(),
-        branch: config.sink.huggingface.branch.clone(),
-        token: std::env::var("HF_TOKEN").context("HF_TOKEN must be set")?,
-        spool_dir: config.spool_dir.clone(),
-        policy: FlushPolicy::new(config.flush.every, config.flush.max_records),
-        gate: CommitGate::new(),
-    })
-}
-
-fn flatten_air_temperature(response: AirTemperatureOperationResponse) -> Vec<StationReading> {
-    match response {
-        AirTemperatureOperationResponse::Ok(ok) => {
-            flatten_station_data(&ok.data.stations, &ok.data.readings)
-        }
-        other => {
-            warn!(?other, "air_temperature returned non-ok response");
-            Vec::new()
-        }
-    }
-}
-
-fn flatten_rainfall(response: RainfallOperationResponse) -> Vec<StationReading> {
-    match response {
-        RainfallOperationResponse::Ok(ok) => {
-            flatten_station_data(&ok.data.stations, &ok.data.readings)
-        }
-        other => {
-            warn!(?other, "rainfall returned non-ok response");
-            Vec::new()
-        }
-    }
-}
-
-fn flatten_pm25(response: Pm25OperationResponse) -> Vec<RegionReading> {
-    match response {
-        Pm25OperationResponse::Ok(ok) => ok
-            .data
-            .items
-            .iter()
-            .flat_map(|item| {
-                let timestamp = fmt_ts(item.timestamp);
-                let regional = &item.readings.pm25_one_hourly;
-                [
-                    ("east", regional.east),
-                    ("west", regional.west),
-                    ("north", regional.north),
-                    ("south", regional.south),
-                    ("central", regional.central),
-                ]
-                .map(|(region, value)| RegionReading {
-                    region: region.to_owned(),
-                    timestamp: timestamp.clone(),
-                    value: f64::from(u16::from(value)),
-                })
-            })
-            .collect(),
-        other => {
-            warn!(?other, "pm25 returned non-ok response");
-            Vec::new()
-        }
+        ctx.tiered(pipeline, terminal)
     }
 }
 
@@ -264,63 +78,52 @@ async fn main() -> anyhow::Result<()> {
     let config_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "examples/meathook.toml".to_owned());
-    let config = load_config(&config_path)?;
-    let ctx = ctx_from_config(&config)?;
+    let config = load_config::<SinkConfig>(&config_path)?;
+    let ctx = Ctx::from_config(&config)?;
+    let sink = SinkCtx::from_config(&config);
 
     let air_temperature = {
         let ctx = ctx.clone();
+        let sink = sink.clone();
         let interval = config.interval("air_temperature");
         move || {
-            let api = ctx.api();
-            let collector = SatayCollector::new(
-                "air_temperature",
-                ctx.client.clone(),
-                move |client| {
-                    let api = api.clone();
-                    async move { api.air_temperature().send_with(&client).await }
-                },
-                flatten_air_temperature,
-            );
-            Pipeline::new(collector, ctx.tiered_hf("air_temperature"), interval)
-                .with_key_fn(|r: &StationReading| (r.station_id.clone(), r.timestamp.clone()))
+            let collector = air_temperature_collector(&ctx);
+            Pipeline::new(
+                collector,
+                sink.tiered::<common::StationReading>(&ctx, "air_temperature"),
+                interval,
+            )
+            .with_key_fn(|r: &common::StationReading| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
 
     let rainfall = {
         let ctx = ctx.clone();
+        let sink = sink.clone();
         let interval = config.interval("rainfall");
         move || {
-            let api = ctx.api();
-            let collector = SatayCollector::new(
-                "rainfall",
-                ctx.client.clone(),
-                move |client| {
-                    let api = api.clone();
-                    async move { api.rainfall().send_with(&client).await }
-                },
-                flatten_rainfall,
-            );
-            Pipeline::new(collector, ctx.tiered_hf("rainfall"), interval)
-                .with_key_fn(|r: &StationReading| (r.station_id.clone(), r.timestamp.clone()))
+            let collector = rainfall_collector(&ctx);
+            Pipeline::new(
+                collector,
+                sink.tiered::<common::StationReading>(&ctx, "rainfall"),
+                interval,
+            )
+            .with_key_fn(|r: &common::StationReading| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
 
     let pm25 = {
         let ctx = ctx.clone();
+        let sink = sink.clone();
         let interval = config.interval("pm25");
         move || {
-            let api = ctx.api();
-            let collector = SatayCollector::new(
-                "pm25",
-                ctx.client.clone(),
-                move |client| {
-                    let api = api.clone();
-                    async move { api.pm25().send_with(&client).await }
-                },
-                flatten_pm25,
-            );
-            Pipeline::new(collector, ctx.tiered_hf("pm25"), interval)
-                .with_key_fn(|r: &RegionReading| (r.region.clone(), r.timestamp.clone()))
+            let collector = pm25_collector(&ctx);
+            Pipeline::new(
+                collector,
+                sink.tiered::<common::RegionReading>(&ctx, "pm25"),
+                interval,
+            )
+            .with_key_fn(|r: &common::RegionReading| (r.region.clone(), r.timestamp.clone()))
         }
     };
 

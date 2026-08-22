@@ -157,46 +157,56 @@ where
 
     /// Append records to the window's segment file, fsyncing the file (and
     /// the directory when the segment is new) before returning.
-    async fn append(&mut self, window: i64, records: Vec<R>) -> Result<(), JsonlStoreError> {
-        self.ensure_dir()?;
-        let path = self.segment_path(window);
+    fn append(
+        &mut self,
+        window: i64,
+        records: Vec<R>,
+    ) -> impl Future<Output = Result<(), JsonlStoreError>> + Send {
+        let result = (|| {
+            self.ensure_dir()?;
+            let path = self.segment_path(window);
 
-        let mut lines = vec![];
-        for record in &records {
-            serde_json::to_writer(&mut lines, record).map_err(JsonlStoreError::Serialize)?;
-            lines.push(b'\n');
-        }
+            let mut lines = vec![];
+            for record in &records {
+                serde_json::to_writer(&mut lines, record).map_err(JsonlStoreError::Serialize)?;
+                lines.push(b'\n');
+            }
 
-        let is_new = !path.exists();
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| io_err(&path, e))?;
-        file.write_all(&lines).map_err(|e| io_err(&path, e))?;
-        file.sync_all().map_err(|e| io_err(&path, e))?;
-        if is_new {
-            fs::File::open(&self.dir)
-                .and_then(|d| d.sync_all())
-                .map_err(|e| io_err(&self.dir, e))?;
-        }
-        Ok(())
+            let is_new = !path.exists();
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .map_err(|e| io_err(&path, e))?;
+            file.write_all(&lines).map_err(|e| io_err(&path, e))?;
+            file.sync_all().map_err(|e| io_err(&path, e))?;
+            if is_new {
+                fs::File::open(&self.dir)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| io_err(&self.dir, e))?;
+            }
+            Ok(())
+        })();
+        std::future::ready(result)
     }
 
-    async fn oldest(
+    fn oldest(
         &mut self,
         after: Option<i64>,
-    ) -> Result<Option<JsonlSegment<R>>, JsonlStoreError> {
-        self.ensure_dir()?;
-        Ok(self
-            .list_segments()?
-            .into_iter()
-            .find(|(window, _)| after.is_none_or(|a| *window > a))
-            .map(|(window, path)| JsonlSegment {
-                window,
-                path,
-                _record: PhantomData,
-            }))
+    ) -> impl Future<Output = Result<Option<JsonlSegment<R>>, JsonlStoreError>> + Send {
+        let result = (|| {
+            self.ensure_dir()?;
+            Ok(self
+                .list_segments()?
+                .into_iter()
+                .find(|(window, _)| after.is_none_or(|a| *window > a))
+                .map(|(window, path)| JsonlSegment {
+                    window,
+                    path,
+                    _record: PhantomData,
+                }))
+        })();
+        std::future::ready(result)
     }
 
     fn pipeline_hint(&self) -> Option<&str> {
@@ -226,39 +236,42 @@ where
         self.window
     }
 
-    async fn records(&mut self) -> Result<Vec<R>, JsonlStoreError> {
-        let contents = fs::read_to_string(&self.path).map_err(|e| io_err(&self.path, e))?;
-        let lines = contents
-            .lines()
-            .filter(|l| !l.is_empty())
-            .collect::<Vec<&str>>();
-        let mut records = Vec::with_capacity(lines.len());
-        let last = lines.len().saturating_sub(1);
-        for (i, line) in lines.iter().enumerate() {
-            match serde_json::from_str::<R>(line) {
-                Ok(record) => records.push(record),
-                Err(error) if i == last => {
-                    warn!(
-                        path = %self.path.display(),
-                        %error,
-                        "skipping torn final line in store segment (crash mid-append)"
-                    );
-                }
-                Err(error) => {
-                    warn!(
-                        path = %self.path.display(),
-                        line = i,
-                        %error,
-                        "skipping corrupt line in store segment"
-                    );
+    fn records(&mut self) -> impl Future<Output = Result<Vec<R>, JsonlStoreError>> + Send {
+        let result = (|| {
+            let contents = fs::read_to_string(&self.path).map_err(|e| io_err(&self.path, e))?;
+            let lines = contents
+                .lines()
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<&str>>();
+            let mut records = Vec::with_capacity(lines.len());
+            let last = lines.len().saturating_sub(1);
+            for (i, line) in lines.iter().enumerate() {
+                match serde_json::from_str::<R>(line) {
+                    Ok(record) => records.push(record),
+                    Err(error) if i == last => {
+                        warn!(
+                            path = %self.path.display(),
+                            %error,
+                            "skipping torn final line in store segment (crash mid-append)"
+                        );
+                    }
+                    Err(error) => {
+                        warn!(
+                            path = %self.path.display(),
+                            line = i,
+                            %error,
+                            "skipping corrupt line in store segment"
+                        );
+                    }
                 }
             }
-        }
-        Ok(records)
+            Ok(records)
+        })();
+        std::future::ready(result)
     }
 
-    async fn commit(self) -> Result<(), JsonlStoreError> {
-        fs::remove_file(&self.path).map_err(|e| io_err(&self.path, e))
+    fn commit(self) -> impl Future<Output = Result<(), JsonlStoreError>> + Send {
+        std::future::ready(fs::remove_file(&self.path).map_err(|e| io_err(&self.path, e)))
     }
 }
 
