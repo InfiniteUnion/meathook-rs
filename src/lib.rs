@@ -19,7 +19,9 @@
 //!   buffering tiers ([`Tier`]), each backed by a pluggable [`Store`]:
 //!   in-memory [`MemStore`], durable write-ahead [`JsonlStore`], or your own.
 //!   Finish the stack with a terminal sink such as `HfSink` (feature
-//!   `huggingface`); fan out completed sinks with [`SinkExt::tee`].
+//!   `huggingface`) or `HfBucketSink` for Hugging Face storage buckets
+//!   (feature `hf-bucket`); fan out completed sinks with
+//!   [`SinkExt::tee`].
 //!
 //! Pipelines (collector + sink stack) are supervised by the [`Meathook`]
 //! runtime: one tokio task each, respawn-on-panic with backoff, and a final
@@ -52,5 +54,10 @@ pub use encode::{CsvEncoder, CsvError};
 pub use encode::{Encoder, JsonEncoder};
 #[cfg(feature = "parquet")]
 pub use encode::{ParquetCompression, ParquetEncodeError, ParquetEncoder, Uncompressed, Zstd};
+#[cfg(feature = "hf-bucket")]
+pub use sink::hf_bucket::{
+    BatchAction, BatchOutcome, CreateBucketAction, CreateBucketOutcome, HfBucketSink,
+    HfBucketSinkError,
+};
 #[cfg(feature = "huggingface")]
 pub use sink::huggingface::{CommitGate, HfSink, HfSinkError};

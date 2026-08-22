@@ -89,8 +89,8 @@ jobs:
             flags: ""
           - name: all-features
             flags: "--all-features"
-          - name: no-default-features
-            flags: "--no-default-features"
+          - name: hf-bucket
+            flags: "--features hf-bucket"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Setup Rust

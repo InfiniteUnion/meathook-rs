@@ -1,7 +1,8 @@
 //! Shared fakes for unit tests: a `Vec`-backed sink with a failure toggle.
 
+use parking_lot::Mutex;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use time::OffsetDateTime;
 
@@ -53,7 +54,7 @@ impl<R> SharedSink<R> {
 impl<R: Clone> SharedSink<R> {
     #[must_use]
     pub fn batches(&self) -> Vec<(WindowMeta, Vec<R>)> {
-        self.batches.lock().unwrap().clone()
+        self.batches.lock().clone()
     }
 
     #[must_use]
@@ -68,20 +69,28 @@ impl<R: Clone> SharedSink<R> {
 impl<R: Send + 'static> Sink<R> for SharedSink<R> {
     type Error = TestSinkFailure;
 
-    async fn ingest(&mut self, meta: &WindowMeta, records: Vec<R>) -> Result<(), Self::Error> {
-        if self.fail.load(Ordering::SeqCst) {
-            return Err(TestSinkFailure);
-        }
-        self.batches.lock().unwrap().push((meta.clone(), records));
-        Ok(())
+    fn ingest(
+        &mut self,
+        meta: &WindowMeta,
+        records: Vec<R>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        let result = if self.fail.load(Ordering::SeqCst) {
+            Err(TestSinkFailure)
+        } else {
+            self.batches.lock().push((meta.clone(), records));
+            Ok(())
+        };
+        std::future::ready(result)
     }
 
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        if self.fail.load(Ordering::SeqCst) {
-            return Err(TestSinkFailure);
-        }
-        self.flushed.store(true, Ordering::SeqCst);
-        Ok(())
+    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        let result = if self.fail.load(Ordering::SeqCst) {
+            Err(TestSinkFailure)
+        } else {
+            self.flushed.store(true, Ordering::SeqCst);
+            Ok(())
+        };
+        std::future::ready(result)
     }
 }
 

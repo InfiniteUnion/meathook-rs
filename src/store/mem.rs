@@ -52,28 +52,30 @@ where
     where
         Self: 'a;
 
-    async fn append(&mut self, window: i64, records: Vec<R>) -> Result<(), Infallible> {
+    fn append(
+        &mut self,
+        window: i64,
+        records: Vec<R>,
+    ) -> impl Future<Output = Result<(), Infallible>> + Send {
         self.windows.entry(window).or_default().extend(records);
-        Ok(())
+        std::future::ready(Ok(()))
     }
 
-    async fn oldest(
+    fn oldest(
         &mut self,
         after: Option<i64>,
-    ) -> Result<Option<MemSegment<'_, R>>, Infallible> {
+    ) -> impl Future<Output = Result<Option<MemSegment<'_, R>>, Infallible>> + Send {
         let lower = after.map_or(Bound::Unbounded, Bound::Excluded);
-        let Some(window) = self
+        let window = self
             .windows
             .range((lower, Bound::Unbounded))
             .next()
-            .map(|(window, _)| *window)
-        else {
-            return Ok(None);
-        };
-        Ok(Some(MemSegment {
+            .map(|(window, _)| *window);
+        let segment = window.map(|window| MemSegment {
             store: self,
             window,
-        }))
+        });
+        std::future::ready(Ok(segment))
     }
 }
 
@@ -96,18 +98,18 @@ where
         self.window
     }
 
-    async fn records(&mut self) -> Result<Vec<R>, Infallible> {
-        Ok(self
+    fn records(&mut self) -> impl Future<Output = Result<Vec<R>, Infallible>> + Send {
+        std::future::ready(Ok(self
             .store
             .windows
             .get(&self.window)
             .cloned()
-            .unwrap_or_default())
+            .unwrap_or_default()))
     }
 
-    async fn commit(self) -> Result<(), Infallible> {
+    fn commit(self) -> impl Future<Output = Result<(), Infallible>> + Send {
         self.store.windows.remove(&self.window);
-        Ok(())
+        std::future::ready(Ok(()))
     }
 }
 
