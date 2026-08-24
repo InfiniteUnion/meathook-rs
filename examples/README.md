@@ -1,29 +1,26 @@
 # NEA weather examples
 
-These examples collect weather data from the Singapore NEA API.
-They store each accepted poll in a local JSONL segment.
-They send closed segments to Hugging Face.
+The examples collect Singapore NEA weather data, fsync accepted records to a
+local JSONL spool, and send closed windows to Hugging Face. The dataset and
+bucket variants share the same collectors, record types, windowing, and replay
+behavior.
 
-Read this guide before you change a poll interval or a flush policy.
-The two values control different clocks.
+## Choose an example
 
-## Select an example
-
-| Example | Terminal sink | Configuration file |
+| Example | Terminal sink | Configuration |
 |---|---|---|
 | `nea_weather` | Hugging Face dataset repository | `examples/meathook.toml` |
 | `nea_weather_bucket` | Hugging Face storage bucket | `examples/meathook_bucket.toml` |
 
-Both examples use the same collectors and record types.
-Both examples put `JsonlStore` directly before the terminal sink.
-This layout gives durable custody to each accepted poll.
+Both stacks put `JsonlStore` directly before the terminal sink, so an accepted
+poll is durable before the pipeline continues.
 
-## Prepare the application
+## Configure and run
 
-1. Put the spool directory on persistent storage.
-2. Set `HF_TOKEN` to a token that has write access.
-3. Set `X_API_KEY` if the NEA service requires this key.
-4. Edit the applicable configuration file.
+1. Put `spool_dir` on persistent storage.
+2. Set `HF_TOKEN` to a token with write access to the repository or bucket.
+3. Set `X_API_KEY` if the NEA service requires one.
+4. Edit the matching TOML configuration.
 
 Run the dataset example:
 
@@ -38,175 +35,136 @@ HF_TOKEN=hf_... cargo run --features hf-bucket \
   --example nea_weather_bucket -- examples/meathook_bucket.toml
 ```
 
-Create the storage bucket before you run the bucket example.
+The storage bucket must exist before the bucket example starts:
 
-## Understand the two clocks
+```bash
+hf buckets create zeon256/meathook-test --private
+```
 
-Do not use `poll interval` and `flush window` as equivalent terms.
-They have different functions.
+## Poll intervals and flush windows
 
-| Clock | Configuration | Function |
-|---|---|---|
-| Poll clock | `collectors.<name>.interval` | Tells the collector when to make a request. |
-| Window clock | `flush.every` | Groups records in UTC wall-clock windows. |
+The two timing settings do different jobs:
 
-The poll clock starts when the process starts.
-The first poll occurs immediately.
-The other polls occur after each configured interval.
+| Setting | Purpose |
+|---|---|
+| `collectors.<name>.interval` | How often that collector calls the NEA API. |
+| `flush.every` | The size of the UTC wall-clock windows stored and uploaded by every pipeline. |
 
-For example, a one-minute poll interval can have these poll times:
+The first poll runs immediately. Later polls run at the configured interval
+relative to process startup. Restarting the process starts a new poll schedule;
+polls are not aligned to UTC boundaries.
+
+`flush.every` does not start a background timer. It divides time into
+Unix-epoch-aligned windows. With the examples' `10m` policy, the windows are:
 
 ```text
-Process start: 00:00:55 UTC
-Polls:         00:00:55, 00:01:55, 00:02:55, ...
+12:00:00–12:10:00 UTC
+12:10:00–12:20:00 UTC
+12:20:00–12:30:00 UTC
 ```
 
-A process restart starts a new poll clock.
-It does not continue the phase of the old poll clock.
+At startup and before every poll, the pipeline calls `Sink::advance()`. That
+check uploads any closed windows before collection begins, including when the
+following collection fails or returns no records. A UTC boundary closes a
+window, but the boundary itself does not run `advance()`; delivery waits for
+the next pipeline check.
+
+This distinction matters when the poll interval is longer than the flush
+window. Both example configurations poll PM2.5 hourly while using 10-minute
+windows. If the process starts at `12:03`:
 
 ```text
-Process restart: 00:57:00 UTC
-Polls:           00:57:00, 00:58:00, 00:59:00, ...
+12:03  Advance, poll PM2.5, and append fresh records to the 12:00 window.
+12:10  The 12:00 window closes. No pipeline task runs at this boundary.
+13:03  Advance uploads the 12:00 window, then the next poll fills 13:00.
+14:03  Advance uploads the 13:00 window, then polling continues.
 ```
 
-The window clock does not depend on the process start time.
-It uses UTC boundaries from the Unix epoch.
-An hourly policy always uses these windows:
+PM2.5 therefore normally produces one occupied window per successful fresh
+poll and uploads it at the next hourly check. It does not create empty files
+for the intervening 10-minute windows, and the schedule does not become
+`1h10m`.
 
-```text
-00:00:00–01:00:00 UTC
-01:00:00–02:00:00 UTC
-02:00:00–03:00:00 UTC
-```
+The faster collectors check for closed windows more often:
 
-The pipeline checks the window clock at startup and before each poll.
-This check is `Sink::advance()`.
-The check occurs when collection returns no records.
-The check also occurs when collection returns an error.
+| Collector | Poll interval | Behavior with `flush.every = "10m"` |
+|---|---:|---|
+| Air temperature | 1 minute | Polls share each window; delivery usually follows within about one minute. |
+| Rainfall | 5 minutes | Polls share each window; delivery usually follows within about five minutes. |
+| PM2.5 | 1 hour | One fresh poll usually occupies a window; delivery waits for the next hourly check. |
 
-## Understand a restart in an active window
+`flush.max_records` is a separate safety valve. Reaching it sends the current
+records before the wall-clock window closes.
 
-This sequence uses an hourly flush window and a one-minute poll interval.
-The application starts at `00:00:55` UTC.
-The application stops and restarts at `00:57:00` UTC.
+## Restarts and shutdown
 
-```mermaid
-sequenceDiagram
-    participant P as Pipeline
-    participant J as 00:00 JSONL segment
-    participant H as Hugging Face
+The examples use `ShutdownPolicy::PreserveActiveWindow`. On graceful shutdown,
+closed windows are delivered and the current partial window stays in the JSONL
+spool. Restarting within that window appends to the same segment instead of
+creating a second one. The stored record count is also restored, so
+`max_records` still accounts for records written before the restart.
 
-    Note over P,H: Flush window is 00:00:00 through 01:00:00 UTC
-    P->>J: 00:00:55 Append the first poll and fsync
-    P->>J: Append each later poll to the same segment
-    P->>J: 00:57:00 Advance and keep the active segment
-    Note over P: The process restarts
-    P->>J: Startup finds the active 00:00 segment
-    P->>J: Append the first poll after the restart
-    P->>J: First poll at or after 01:00 advances the window
-    J->>H: Send the closed 00:00 window
-    H-->>J: Accept the window
-    Note over J: Remove the accepted segment
-```
+This is durable because `JsonlStore` is the first and only buffering tier. Do
+not put a volatile `MemStore` before it while using
+`PreserveActiveWindow`; records still held in memory would not survive exit.
 
-The restart does not make a second segment for the same active window.
-The restarted process appends records to the same Unix-timestamp JSONL file.
-The tier also restores the persisted record count.
-The `max_records` limit continues to use the count from before the restart.
+`ShutdownPolicy::FlushAll` also sends the active partial window. Use it when
+remote storage must receive current records during shutdown. If a process
+using `PreserveActiveWindow` never starts again, its active segment remains
+durable locally but is not delivered.
 
-## Understand the delivery time
+## Local spool and remote files
 
-A UTC boundary closes a window.
-The boundary does not start a collector task.
-The next lifecycle check sends the closed window.
-
-For a one-minute poll interval, the delivery delay is usually less than one minute.
-For a one-hour poll interval, the delay can be much longer.
-
-Use this example:
-
-```text
-Poll interval:    1 hour
-Process start:    00:00:55 UTC
-Process restart:  00:57:00 UTC
-Poll after restart: 00:57:00 UTC
-Next poll:        01:57:00 UTC
-```
-
-The `00:00–01:00` window closes at `01:00:00`.
-The pipeline does not have a lifecycle check at that time.
-It sends the closed window at `01:57:00` or soon after.
-
-Select a poll interval that is shorter than the flush window.
-A shorter interval reduces the delivery delay after a UTC boundary.
-
-The current scheduler does not align polls to UTC boundaries.
-It also does not keep a stable poll phase across restarts.
-This behavior does not change the UTC identity of a storage window.
-
-## Select a shutdown policy
-
-The examples use `ShutdownPolicy::PreserveActiveWindow`.
-On graceful shutdown, this policy sends closed windows only.
-It keeps the active window in the JSONL spool.
-
-Use this policy when all active records are in a durable store.
-The examples satisfy this requirement because `JsonlStore` is the first tier.
-
-Do not put `MemStore` before `JsonlStore` with this shutdown policy.
-An active `MemStore` window does not survive process exit.
-
-`ShutdownPolicy::FlushAll` sends all windows during shutdown.
-It also sends the active partial window.
-Use this policy when the remote sink must have the current records.
-
-If a preserved process never starts again, its active data stays local.
-Before permanent removal, change the policy to `FlushAll`.
-Then stop the application gracefully.
-
-## Understand physical files
-
-One UTC window can produce more than one remote file.
-This condition occurs when `max_records` sends a partial segment.
-This condition also occurs after an explicit force flush.
-
-Remote paths include a content fingerprint.
-The fingerprint prevents one physical file from overwriting another file.
-A deterministic replay uses the same path.
-
-If Hugging Face rejects a window, `JsonlStore` keeps its segment.
-A later lifecycle check tries to send the segment again.
-
-## Inspect the spool
-
-The spool has one directory for each pipeline.
-An active hourly window has a file such as this file:
+The spool has one directory per pipeline and one JSONL file per occupied
+window:
 
 ```text
 spool-test/air_temperature/1788134400.jsonl
 ```
 
-The file name is the Unix timestamp for the window start.
-Successful delivery removes the applicable segment.
-The directory can continue to exist after segment removal.
+The filename is the UTC window-start Unix timestamp. Successful remote
+delivery removes the segment. A rejected delivery leaves it in place for a
+later retry.
 
-Use this command to inspect local custody:
+Dataset and bucket sinks use the same remote path format:
+
+```text
+data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{content-hash}.parquet
+```
+
+For example:
+
+```text
+data/air_temperature/2026-08-24/19-20-00-8753a334ba360b8d.parquet
+```
+
+The date and time identify the UTC window start. The content fingerprint keeps
+multiple physical drains of one window distinct. This can happen when
+`max_records` fires or the application explicitly force-flushes a partial
+window. Replaying identical records produces the same bytes and path, so a
+retry overwrites the same object rather than creating a duplicate.
+
+No remote file is created for an empty window.
+
+To inspect records still held locally:
 
 ```bash
 find ./spool-test -type f -name '*.jsonl' -print
 ```
 
-Do not remove an active or rejected segment unless you accept data loss.
+Do not delete an active or rejected segment unless you accept losing those
+records.
 
-## Configuration example
+## Configuration reference
 
-This configuration polls each minute and makes one-hour UTC windows:
+The flush policy is shared by all collectors, while each collector has its own
+poll interval:
 
 ```toml
 spool_dir = "/var/lib/meathook/spool"
 
 [flush]
-every = "1h"
+every = "10m"
 max_records = 50_000
 
 [sink.huggingface]
@@ -215,8 +173,14 @@ branch = "main"
 
 [collectors.air_temperature]
 interval = "1m"
+
+[collectors.rainfall]
+interval = "5m"
+
+[collectors.pm25]
+interval = "1h"
 ```
 
-The flush policy groups records by arrival time.
-It does not use a timestamp from the record.
-When the source supplies a timestamp, use it as the deduplication key.
+Window assignment uses the time records reach the pipeline, not timestamps
+inside the source payload. The examples use the source timestamp together
+with the station or region as the deduplication key.

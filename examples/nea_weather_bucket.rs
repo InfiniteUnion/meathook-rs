@@ -84,11 +84,10 @@ async fn main() -> anyhow::Result<()> {
             let stack = sink
                 .durable::<common::StationReading>(&ctx, "air_temperature")
                 .expect("xet session");
+
             Pipeline::new(collector, stack, interval)
                 .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
-                .with_key_fn(|r: &common::StationReading| {
-                    (r.station_id.clone(), r.timestamp.clone())
-                })
+                .with_key_fn(|r| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
 
@@ -101,11 +100,10 @@ async fn main() -> anyhow::Result<()> {
             let stack = sink
                 .durable::<common::StationReading>(&ctx, "rainfall")
                 .expect("xet session");
+
             Pipeline::new(collector, stack, interval)
                 .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
-                .with_key_fn(|r: &common::StationReading| {
-                    (r.station_id.clone(), r.timestamp.clone())
-                })
+                .with_key_fn(|r| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
 
@@ -118,9 +116,10 @@ async fn main() -> anyhow::Result<()> {
             let stack = sink
                 .durable::<common::RegionReading>(&ctx, "pm25")
                 .expect("xet session");
+
             Pipeline::new(collector, stack, interval)
                 .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
-                .with_key_fn(|r: &common::RegionReading| (r.region.clone(), r.timestamp.clone()))
+                .with_key_fn(|r| (r.region.clone(), r.timestamp.clone()))
         }
     };
 
