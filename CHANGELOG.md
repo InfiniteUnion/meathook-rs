@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/InfiniteUnion/meathook-rs/compare/v0.4.1...v0.4.2) - 2026-08-24
+
+### Added
+
+- *(layer)* preserve wall-clock windows across graceful restarts
+
 ### Added
 
 - `Sink::advance(now)` separates delivery of closed UTC wall-clock windows
