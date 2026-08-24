@@ -55,13 +55,13 @@ relative to process startup. Restarting the process starts a new poll schedule;
 polls are not aligned to UTC boundaries.
 
 `flush.every` does not start a background timer. It divides time into
-Unix-epoch-aligned windows. With the examples' `10m` policy, the windows are:
+Unix-epoch-aligned windows. The two example configurations intentionally use
+different cadences:
 
-```text
-12:00:00–12:10:00 UTC
-12:10:00–12:20:00 UTC
-12:20:00–12:30:00 UTC
-```
+| Example | Flush window | Air temperature | Rainfall | PM2.5 |
+|---|---:|---:|---:|---:|
+| Dataset repository | 10 minutes | 1 minute | 5 minutes | 1 hour |
+| Storage bucket | 15 minutes | 5 minutes | 5 minutes | 15 minutes |
 
 At startup and before every poll, the pipeline calls `Sink::advance()`. That
 check uploads any closed windows before collection begins, including when the
@@ -69,32 +69,32 @@ following collection fails or returns no records. A UTC boundary closes a
 window, but the boundary itself does not run `advance()`; delivery waits for
 the next pipeline check.
 
-This distinction matters when the poll interval is longer than the flush
-window. Both example configurations poll PM2.5 hourly while using 10-minute
-windows. If the process starts at `12:03`:
+The dataset example demonstrates a poll interval longer than its flush window.
+If it starts at `12:03`:
 
 ```text
-12:03  Advance, poll PM2.5, and append fresh records to the 12:00 window.
-12:10  The 12:00 window closes. No pipeline task runs at this boundary.
-13:03  Advance uploads the 12:00 window, then the next poll fills 13:00.
-14:03  Advance uploads the 13:00 window, then polling continues.
+12:03  Poll PM2.5 and append fresh records to the 12:00–12:10 window.
+12:10  The window closes, but no pipeline task runs at this boundary.
+13:03  Advance uploads 12:00, then the next poll fills the 13:00 window.
 ```
 
-PM2.5 therefore normally produces one occupied window per successful fresh
-poll and uploads it at the next hourly check. It does not create empty files
-for the intervening 10-minute windows, and the schedule does not become
-`1h10m`.
+It normally produces one occupied PM2.5 window per successful fresh poll and
+uploads it at the next hourly check. Empty intervening windows do not produce
+files, and the schedule does not become `1h10m`.
 
-The faster collectors check for closed windows more often:
+The bucket example polls PM2.5 every 15 minutes into 15-minute windows. If it
+also starts at `12:03`:
 
-| Collector | Poll interval | Behavior with `flush.every = "10m"` |
-|---|---:|---|
-| Air temperature | 1 minute | Polls share each window; delivery usually follows within about one minute. |
-| Rainfall | 5 minutes | Polls share each window; delivery usually follows within about five minutes. |
-| PM2.5 | 1 hour | One fresh poll usually occupies a window; delivery waits for the next hourly check. |
+```text
+12:03  Poll PM2.5 and append fresh records to the 12:00–12:15 window.
+12:15  The window closes, but no pipeline task runs at this boundary.
+12:18  Advance uploads 12:00, then the next poll fills the 12:15 window.
+```
 
-`flush.max_records` is a separate safety valve. Reaching it sends the current
-records before the wall-clock window closes.
+The air-temperature and rainfall collectors check for closed windows more
+often because their poll intervals are shorter. `flush.max_records` is a
+separate safety valve; reaching it sends the current records before the
+wall-clock window closes.
 
 ## Restarts and shutdown
 
@@ -157,8 +157,8 @@ records.
 
 ## Configuration reference
 
-The flush policy is shared by all collectors, while each collector has its own
-poll interval:
+The dataset repository configuration uses a shared 10-minute flush policy and
+per-collector poll intervals:
 
 ```toml
 spool_dir = "/var/lib/meathook/spool"

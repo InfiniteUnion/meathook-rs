@@ -12,17 +12,17 @@ spool_dir = "./spool-test-bucket" # PVC mount on k8s; separate from the
                                   # run side by side
 
 [flush] # FlushPolicy for each pipeline's durable JSONL tier
-every = "10m"
+every = "15m"
 max_records = 50_000
 
 [sink.bucket]
 id = "zeon256/meathook-test"
 
 [collectors.air_temperature]
-interval = "1m"
+interval = "5m"
 
 [collectors.rainfall]
 interval = "5m"
 
 [collectors.pm25]
-interval = "1h"
+interval = "15m"

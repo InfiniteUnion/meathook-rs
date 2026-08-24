@@ -35,6 +35,19 @@ pub enum ShutdownPolicy {
     PreserveActiveWindow,
 }
 
+trait WallClock {
+    fn now_utc(&self) -> OffsetDateTime;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SystemClock;
+
+impl WallClock for SystemClock {
+    fn now_utc(&self) -> OffsetDateTime {
+        OffsetDateTime::now_utc()
+    }
+}
+
 /// A collector polled on `poll_interval`, feeding a sink stack.
 ///
 /// Consecutive polls of "latest reading" APIs return repeats, so an optional
@@ -114,13 +127,20 @@ where
     ///
     /// Collector and sink errors are logged, never fatal: the loop keeps
     /// ticking and durable layers retry on their own cadence.
-    pub async fn run(mut self, cancel: CancellationToken) {
+    pub async fn run(self, cancel: CancellationToken) {
+        self.run_with_clock(cancel, SystemClock).await;
+    }
+
+    async fn run_with_clock<W>(mut self, cancel: CancellationToken, clock: W)
+    where
+        W: WallClock,
+    {
         let name = self.collector.name().to_owned();
         info!(pipeline = %name, interval = ?self.poll_interval, "pipeline starting");
 
         // Recover closed durable windows without splitting the wall-clock
         // window which is still active at startup.
-        if let Err(error) = self.sink.advance(OffsetDateTime::now_utc()).await {
+        if let Err(error) = self.sink.advance(clock.now_utc()).await {
             warn!(pipeline = %name, %error, "startup window advancement failed");
         }
 
@@ -130,7 +150,7 @@ where
         loop {
             tokio::select! {
                 () = cancel.cancelled() => break,
-                _instant = interval.tick() => self.tick(&name).await,
+                _instant = interval.tick() => self.tick(&name, &clock).await,
             }
         }
 
@@ -141,7 +161,7 @@ where
             }
             ShutdownPolicy::PreserveActiveWindow => {
                 info!(pipeline = %name, "pipeline shutting down; preserving active wall-clock window");
-                self.sink.advance(OffsetDateTime::now_utc()).await
+                self.sink.advance(clock.now_utc()).await
             }
         };
         if let Err(error) = result {
@@ -149,8 +169,8 @@ where
         }
     }
 
-    async fn tick(&mut self, name: &str) {
-        let start = OffsetDateTime::now_utc();
+    async fn tick(&mut self, name: &str, clock: &impl WallClock) {
+        let start = clock.now_utc();
         // This heartbeat is independent of collection success or batch
         // size, so an idle collector still closes elapsed windows.
         if let Err(error) = self.sink.advance(start).await {
@@ -174,7 +194,7 @@ where
         let meta = WindowMeta {
             pipeline: name.to_owned(),
             start,
-            end: OffsetDateTime::now_utc(),
+            end: clock.now_utc(),
         };
         if let Err(error) = self.sink.ingest(&meta, records).await {
             warn!(pipeline = %name, %error, "sink ingest failed");
@@ -204,13 +224,128 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::convert::Infallible;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::*;
-    use crate::test_util::SharedSink;
+    use ::time::macros::datetime;
+    use parking_lot::Mutex;
+    use serde::{Deserialize, Serialize};
+    use tokio::sync::Notify;
 
+    use super::*;
+    use crate::test_util::{FakeObjectSink, SharedSink};
+    use crate::{FlushPolicy, JsonlStore, Tier};
+
+    #[derive(Clone)]
+    struct ManualClock(Arc<Mutex<OffsetDateTime>>);
+
+    impl ManualClock {
+        fn at(now: OffsetDateTime) -> Self {
+            Self(Arc::new(Mutex::new(now)))
+        }
+
+        fn set(&self, now: OffsetDateTime) {
+            *self.0.lock() = now;
+        }
+    }
+
+    impl WallClock for ManualClock {
+        fn now_utc(&self) -> OffsetDateTime {
+            *self.0.lock()
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct Pm25Reading {
+        region: String,
+        timestamp: String,
+        value: f64,
+    }
+
+    enum Pm25Poll {
+        Records(Vec<Pm25Reading>),
+        Empty,
+        Error,
+    }
+
+    #[derive(Clone, Default)]
+    struct PollProgress {
+        completed: Arc<AtomicUsize>,
+        changed: Arc<Notify>,
+    }
+
+    impl PollProgress {
+        async fn wait_for(&self, target: usize) {
+            loop {
+                if self.completed.load(Ordering::SeqCst) >= target {
+                    return;
+                }
+                let changed = self.changed.notified();
+                if self.completed.load(Ordering::SeqCst) >= target {
+                    return;
+                }
+                changed.await;
+            }
+        }
+    }
+
+    struct ScriptedPm25 {
+        polls: VecDeque<Pm25Poll>,
+        progress: PollProgress,
+    }
+
+    impl ScriptedPm25 {
+        fn new(polls: impl IntoIterator<Item = Pm25Poll>) -> Self {
+            Self {
+                polls: polls.into_iter().collect(),
+                progress: PollProgress::default(),
+            }
+        }
+
+        fn progress(&self) -> PollProgress {
+            self.progress.clone()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("scripted PM2.5 provider failure")]
+    struct ScriptedPm25Error;
+
+    impl Collector for ScriptedPm25 {
+        type Record = Pm25Reading;
+        type Error = ScriptedPm25Error;
+
+        fn name(&self) -> &'static str {
+            "pm25"
+        }
+
+        fn collect(
+            &mut self,
+        ) -> impl Future<Output = Result<Vec<Pm25Reading>, ScriptedPm25Error>> + Send {
+            let result = match self.polls.pop_front().unwrap_or(Pm25Poll::Empty) {
+                Pm25Poll::Records(records) => Ok(records),
+                Pm25Poll::Empty => Ok(vec![]),
+                Pm25Poll::Error => Err(ScriptedPm25Error),
+            };
+            self.progress.completed.fetch_add(1, Ordering::SeqCst);
+            self.progress.changed.notify_one();
+            std::future::ready(result)
+        }
+    }
+
+    fn pm25_rows(timestamp: &str, base: f64) -> Vec<Pm25Reading> {
+        ["east", "west", "north", "south", "central"]
+            .into_iter()
+            .enumerate()
+            .map(|(offset, region)| Pm25Reading {
+                region: region.to_owned(),
+                timestamp: timestamp.to_owned(),
+                value: base + offset as f64,
+            })
+            .collect()
+    }
     /// Emits `(tick, i)` pairs, overlapping the previous tick's batch to
     /// exercise dedup: tick n emits keys n and n+1.
     struct FakeCollector {
@@ -347,5 +482,169 @@ mod tests {
         assert!(sink.records().is_empty());
         assert_eq!(sink.advances(), calls.load(Ordering::SeqCst) + 2);
         assert!(!sink.flushed());
+    }
+    #[tokio::test(start_paused = true)]
+    async fn configured_pm25_poll_uploads_previous_fifteen_minute_window() {
+        let spool = tempfile::tempdir().unwrap();
+        let spool_dir = spool.path().join("pm25");
+        let remote = FakeObjectSink::default();
+        let first = pm25_rows("2026-08-25T12:00:00Z", 10.0);
+        let second = pm25_rows("2026-08-25T12:15:00Z", 20.0);
+        let collector = ScriptedPm25::new([
+            Pm25Poll::Records(first.clone()),
+            Pm25Poll::Records(second.clone()),
+        ]);
+        let progress = collector.progress();
+        let stack = Tier::new(
+            JsonlStore::new(&spool_dir),
+            FlushPolicy::every(Duration::from_secs(900)),
+            remote.clone(),
+        );
+        let pipeline = Pipeline::new(collector, stack, Duration::from_secs(900))
+            .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
+            .with_key_fn(|row: &Pm25Reading| (row.region.clone(), row.timestamp.clone()));
+        let clock = ManualClock::at(datetime!(2026-08-25 12:03 UTC));
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(pipeline.run_with_clock(cancel.clone(), clock.clone()));
+
+        progress.wait_for(1).await;
+        assert!(remote.objects().is_empty());
+
+        clock.set(datetime!(2026-08-25 12:18 UTC));
+        time::advance(Duration::from_secs(900)).await;
+        progress.wait_for(2).await;
+
+        cancel.cancel();
+        handle.await.unwrap();
+
+        let objects = remote.objects();
+        assert_eq!(objects.len(), 1);
+        let (path, content) = objects.iter().next().unwrap();
+        assert!(path.starts_with("data/pm25/2026-08-25/12-00-00-"));
+        assert_eq!(
+            serde_json::from_slice::<Vec<Pm25Reading>>(content).unwrap(),
+            first
+        );
+
+        let segments = std::fs::read_dir(spool_dir)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(segments.len(), 1);
+        let active = std::fs::read_to_string(segments[0].path()).unwrap();
+        let active = active
+            .lines()
+            .map(|line| serde_json::from_str::<Pm25Reading>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(active, second);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_error_still_advances_closed_pm25_window() {
+        let spool = tempfile::tempdir().unwrap();
+        let spool_dir = spool.path().join("pm25");
+        let remote = FakeObjectSink::default();
+        let collector = ScriptedPm25::new([
+            Pm25Poll::Records(pm25_rows("2026-08-25T12:00:00Z", 10.0)),
+            Pm25Poll::Error,
+        ]);
+        let progress = collector.progress();
+        let stack = Tier::new(
+            JsonlStore::new(&spool_dir),
+            FlushPolicy::every(Duration::from_secs(900)),
+            remote.clone(),
+        );
+        let pipeline = Pipeline::new(collector, stack, Duration::from_secs(900))
+            .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
+            .with_key_fn(|row: &Pm25Reading| (row.region.clone(), row.timestamp.clone()));
+        let clock = ManualClock::at(datetime!(2026-08-25 12:03 UTC));
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(pipeline.run_with_clock(cancel.clone(), clock.clone()));
+
+        progress.wait_for(1).await;
+        clock.set(datetime!(2026-08-25 12:18 UTC));
+        time::advance(Duration::from_secs(900)).await;
+        progress.wait_for(2).await;
+
+        cancel.cancel();
+        handle.await.unwrap();
+
+        let objects = remote.objects();
+        assert_eq!(objects.len(), 1);
+        assert!(
+            objects
+                .keys()
+                .next()
+                .unwrap()
+                .starts_with("data/pm25/2026-08-25/12-00-00-")
+        );
+        assert_eq!(std::fs::read_dir(spool_dir).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn repeated_pm25_snapshot_is_deduplicated_until_timestamp_changes() {
+        let first = pm25_rows("2026-08-25T12:00:00Z", 10.0);
+        let second = pm25_rows("2026-08-25T12:15:00Z", 20.0);
+        let collector = ScriptedPm25::new([
+            Pm25Poll::Records(first.clone()),
+            Pm25Poll::Records(first.clone()),
+            Pm25Poll::Records(second.clone()),
+        ]);
+        let sink = SharedSink::new();
+        let mut pipeline = Pipeline::new(collector, sink.clone(), Duration::from_secs(900))
+            .with_key_fn(|row: &Pm25Reading| (row.region.clone(), row.timestamp.clone()));
+        let clock = ManualClock::at(datetime!(2026-08-25 12:03 UTC));
+
+        pipeline.tick("pm25", &clock).await;
+        clock.set(datetime!(2026-08-25 12:04 UTC));
+        pipeline.tick("pm25", &clock).await;
+        clock.set(datetime!(2026-08-25 12:18 UTC));
+        pipeline.tick("pm25", &clock).await;
+
+        let mut expected = first;
+        expected.extend(second);
+        assert_eq!(sink.records(), expected);
+    }
+
+    #[tokio::test]
+    async fn restart_resets_pm25_dedupe_and_can_repeat_source_rows() {
+        let spool = tempfile::tempdir().unwrap();
+        let spool_dir = spool.path().join("pm25");
+        let remote = FakeObjectSink::default();
+        let repeated = pm25_rows("2026-08-25T12:00:00Z", 10.0);
+        let clock = ManualClock::at(datetime!(2026-08-25 12:03 UTC));
+
+        {
+            let stack = Tier::new(
+                JsonlStore::new(&spool_dir),
+                FlushPolicy::every(Duration::from_secs(900)),
+                remote.clone(),
+            );
+            let collector = ScriptedPm25::new([Pm25Poll::Records(repeated.clone())]);
+            let mut pipeline = Pipeline::new(collector, stack, Duration::from_secs(900))
+                .with_key_fn(|row: &Pm25Reading| (row.region.clone(), row.timestamp.clone()));
+            pipeline.tick("pm25", &clock).await;
+        }
+
+        let stack = Tier::new(
+            JsonlStore::new(&spool_dir),
+            FlushPolicy::every(Duration::from_secs(900)),
+            remote.clone(),
+        );
+        let collector = ScriptedPm25::new([Pm25Poll::Records(repeated), Pm25Poll::Empty]);
+        let mut restarted = Pipeline::new(collector, stack, Duration::from_secs(900))
+            .with_key_fn(|row: &Pm25Reading| (row.region.clone(), row.timestamp.clone()));
+
+        clock.set(datetime!(2026-08-25 12:04 UTC));
+        restarted.tick("pm25", &clock).await;
+        clock.set(datetime!(2026-08-25 12:18 UTC));
+        restarted.tick("pm25", &clock).await;
+
+        let objects = remote.objects();
+        assert_eq!(objects.len(), 1);
+        let rows =
+            serde_json::from_slice::<Vec<Pm25Reading>>(objects.values().next().unwrap()).unwrap();
+        assert_eq!(rows.len(), 10);
+        assert_eq!(&rows[..5], &rows[5..]);
     }
 }
