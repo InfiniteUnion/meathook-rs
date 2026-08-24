@@ -295,7 +295,7 @@ mod tests {
     use super::*;
     use crate::layer::{FlushPolicy, Tier};
     use crate::sink::Sink;
-    use crate::test_util::{SharedSink, meta_at};
+    use crate::test_util::{FakeObjectSink, SharedSink, meta_at};
     use time::OffsetDateTime;
 
     fn policy() -> FlushPolicy {
@@ -553,6 +553,51 @@ mod tests {
 
         assert_eq!(inner.batches()[0].1, vec![1, 2, 3]);
         assert_eq!(fs::read_dir(&store_dir).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn acknowledgement_loss_replays_the_same_remote_object_after_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_dir = dir.path().join("pm25");
+        let remote = FakeObjectSink::default();
+        let fifteen_minutes = FlushPolicy::every(Duration::from_secs(900));
+
+        remote.fail_after_put_once();
+        {
+            let mut first = Tier::new(JsonlStore::new(&store_dir), fifteen_minutes, remote.clone());
+            first
+                .ingest(&meta_at("pm25", 43_380), vec![1, 2])
+                .await
+                .unwrap();
+            assert!(remote.objects().is_empty());
+
+            assert!(
+                first
+                    .advance(OffsetDateTime::from_unix_timestamp(46_980).unwrap())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(remote.objects().len(), 1);
+            assert!(store_dir.join("43200.jsonl").exists());
+        }
+
+        {
+            let mut restarted = Tier::new(
+                JsonlStore::<i32>::new(&store_dir),
+                fifteen_minutes,
+                remote.clone(),
+            );
+            restarted
+                .advance(OffsetDateTime::from_unix_timestamp(50_580).unwrap())
+                .await
+                .unwrap();
+        }
+
+        let attempts = remote.attempts();
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0], attempts[1]);
+        assert_eq!(remote.objects().len(), 1);
+        assert!(!store_dir.join("43200.jsonl").exists());
     }
 
     #[tokio::test]
