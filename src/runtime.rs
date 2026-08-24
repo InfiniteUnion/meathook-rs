@@ -4,7 +4,7 @@
 //! tokio task. Panicked pipelines are rebuilt from their factory and
 //! respawned with exponential backoff (durable layers re-run crash recovery
 //! on whatever the dead task left behind). On SIGTERM/ctrl-c every pipeline
-//! drains its sink stack before the runtime returns.
+//! applies its configured shutdown policy before the runtime returns.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -121,8 +121,8 @@ impl Meathook {
         MeathookBuilder::default()
     }
 
-    /// Run until SIGTERM/ctrl-c, then drain every pipeline's sink stack
-    /// before returning.
+    /// Run until SIGTERM/ctrl-c, then let every pipeline apply its configured
+    /// shutdown policy before returning.
     ///
     /// # Errors
     ///

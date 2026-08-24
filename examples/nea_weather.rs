@@ -2,11 +2,10 @@
 //! readings and ships configured parquet windows to a `HuggingFace` dataset
 //! repo.
 //!
-//! Each pipeline's stack is `Tier(MemStore) → Tier(JsonlStore) → HfSink`.
-//! The outer memory tier batches for five minutes or 10,000 records; its
-//! batches are then appended to an fsynced JSONL segment, and the configured
-//! durable tier flushes windows to HF. Records still held in memory remain
-//! volatile; leftover JSONL segments replay on the next start.
+//! Each pipeline's stack is `Tier(JsonlStore) → HfSink`: every accepted poll
+//! is fsynced locally, and graceful shutdown preserves the active UTC window
+//! so a restarted process continues the same JSONL segment. Closed windows
+//! and `max_records` chunks are delivered to Hugging Face.
 //!
 //! Collectors, records, and config plumbing are shared with the bucket
 //! variant in `examples/nea_weather_bucket.rs` via `examples/common/mod.rs`.
@@ -22,7 +21,7 @@ use common::{
     Config, Ctx, air_temperature_collector, init_tracing, load_config, pm25_collector,
     rainfall_collector,
 };
-use meathook::{CommitGate, HfSink, Meathook, Pipeline};
+use meathook::{CommitGate, HfSink, Meathook, Pipeline, ShutdownPolicy};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -60,14 +59,14 @@ impl SinkCtx {
         }
     }
 
-    fn tiered<R>(&self, ctx: &Ctx, pipeline: &str) -> common::TieredStack<R, HfSink<R>>
+    fn durable<R>(&self, ctx: &Ctx, pipeline: &str) -> common::DurableStack<R, HfSink<R>>
     where
-        R: Clone + serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+        R: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     {
         let terminal = HfSink::new(ctx.client.clone(), self.repo.clone(), ctx.token.clone())
             .branch(self.branch.clone())
             .gate(self.gate.clone());
-        ctx.tiered(pipeline, terminal)
+        ctx.durable(pipeline, terminal)
     }
 }
 
@@ -90,9 +89,10 @@ async fn main() -> anyhow::Result<()> {
             let collector = air_temperature_collector(&ctx);
             Pipeline::new(
                 collector,
-                sink.tiered::<common::StationReading>(&ctx, "air_temperature"),
+                sink.durable::<common::StationReading>(&ctx, "air_temperature"),
                 interval,
             )
+            .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
             .with_key_fn(|r: &common::StationReading| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
@@ -105,9 +105,10 @@ async fn main() -> anyhow::Result<()> {
             let collector = rainfall_collector(&ctx);
             Pipeline::new(
                 collector,
-                sink.tiered::<common::StationReading>(&ctx, "rainfall"),
+                sink.durable::<common::StationReading>(&ctx, "rainfall"),
                 interval,
             )
+            .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
             .with_key_fn(|r: &common::StationReading| (r.station_id.clone(), r.timestamp.clone()))
         }
     };
@@ -120,9 +121,10 @@ async fn main() -> anyhow::Result<()> {
             let collector = pm25_collector(&ctx);
             Pipeline::new(
                 collector,
-                sink.tiered::<common::RegionReading>(&ctx, "pm25"),
+                sink.durable::<common::RegionReading>(&ctx, "pm25"),
                 interval,
             )
+            .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
             .with_key_fn(|r: &common::RegionReading| (r.region.clone(), r.timestamp.clone()))
         }
     };

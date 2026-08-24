@@ -112,6 +112,20 @@ where
         }
     }
 
+    async fn advance(&mut self, now: time::OffsetDateTime) -> Result<(), Self::Error> {
+        let first = self.0.advance(now).await;
+        let second = self.1.advance(now).await;
+        match (first, second) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(a), Ok(())) => Err(TeeError::First(a)),
+            (Ok(()), Err(b)) => Err(TeeError::Second(b)),
+            (Err(a), Err(b)) => Err(TeeError::Both {
+                first: a,
+                second: b,
+            }),
+        }
+    }
+
     async fn flush(&mut self) -> Result<(), Self::Error> {
         let first = self.0.flush().await;
         let second = self.1.flush().await;
@@ -153,5 +167,19 @@ mod tests {
         let err = sink.ingest(&meta("p"), vec![1]).await.unwrap_err();
         assert!(matches!(err, TeeError::First(_)));
         assert_eq!(b.batches().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tee_advances_both_branches() {
+        let a = SharedSink::<i32>::new();
+        let b = SharedSink::<i32>::new();
+        let mut sink = a.clone().tee(b.clone());
+
+        sink.advance(time::OffsetDateTime::UNIX_EPOCH)
+            .await
+            .unwrap();
+
+        assert_eq!(a.advances(), 1);
+        assert_eq!(b.advances(), 1);
     }
 }

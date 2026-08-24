@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Sink::advance(now)` separates delivery of closed UTC wall-clock windows
+  from `flush()`, which continues to force-deliver active partial windows.
+- `Pipeline::with_shutdown_policy` and `ShutdownPolicy` let graceful shutdown
+  choose between the existing `FlushAll` behavior and preserving a durable
+  active window for continuation after restart.
+
+### Changed
+
+- Pipeline startup and every poll heartbeat now advance sink wall time, even
+  when collection fails or returns no records.
+- Durable tiers retain the current JSONL segment during wall advancement and
+  restore its persisted record count so `max_records` remains effective after
+  a restart.
+- The NEA dataset and bucket examples now place `JsonlStore` directly around
+  their terminal sinks and preserve active windows on graceful shutdown.
+- The new examples guide explains poll timing, UTC window timing, restart
+  continuation, delivery delay, and shutdown policies.
+
 ## [0.4.1](https://github.com/InfiniteUnion/meathook-rs/compare/v0.4.0...v0.4.1) - 2026-08-22
 
 ### Added

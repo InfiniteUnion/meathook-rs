@@ -1,8 +1,7 @@
 //! Wiring shared by the `nea_weather*` examples: NEA collectors, row-shaped
-//! records, TOML config plumbing, tracing setup, and the two-tier buffering
-//! stack (`Tier(MemStore) → Tier(JsonlStore)`) each example finishes with
-//! its own terminal sink (`HfSink` for dataset repos, `HfBucketSink` for
-//! storage buckets).
+//! records, TOML config plumbing, tracing setup, and the durable
+//! `Tier(JsonlStore)` each example finishes with its own terminal sink
+//! (`HfSink` for dataset repos, `HfBucketSink` for storage buckets).
 //!
 //! This file is a module of each example, not an example itself: cargo only
 //! discovers `examples/<name>.rs` and `examples/<name>/main.rs`.
@@ -12,9 +11,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use meathook::{
-    Collector, FlushPolicy, JsonlStore, MemStore, SatayCollector, Sink, SinkStack, Tier,
-};
+use meathook::{Collector, FlushPolicy, JsonlStore, SatayCollector, Sink, SinkStack, Tier};
 use nea_rs::{
     AirTemperatureOperationResponse, NeaReadingSnapshot, NeaWeatherStation, Pm25OperationResponse,
     RainfallOperationResponse,
@@ -25,13 +22,9 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use tracing::warn;
 
-/// Outer memory tier: batch for five minutes or 10,000 records before the
-/// records reach the fsynced JSONL tier.
-pub const MEMORY_FLUSH_POLICY: FlushPolicy = FlushPolicy::new(Duration::from_secs(300), 10_000);
-
 /// The stack every `nea_weather*` example builds:
-/// memory batching, durable spool, then the example's terminal sink `S`.
-pub type TieredStack<R, S> = Tier<R, MemStore<R>, Tier<R, JsonlStore<R>, S>>;
+/// durable spool directly wrapping the example's terminal sink `S`.
+pub type DurableStack<R, S> = Tier<R, JsonlStore<R>, S>;
 
 /// Example configuration. `S` is the example-specific sink section
 /// (`[sink.huggingface]` or `[sink.bucket]`).
@@ -199,14 +192,13 @@ impl Ctx {
         }
     }
 
-    /// In-memory batching, durable spool, then `terminal`.
-    pub fn tiered<R, S>(&self, pipeline: &str, terminal: S) -> TieredStack<R, S>
+    /// Durable write-ahead spool directly wrapping `terminal`.
+    pub fn durable<R, S>(&self, pipeline: &str, terminal: S) -> DurableStack<R, S>
     where
-        R: Clone + Serialize + DeserializeOwned + Send + 'static,
+        R: Serialize + DeserializeOwned + Send + 'static,
         S: Sink<R>,
     {
         SinkStack::new()
-            .tier(MemStore::new(), MEMORY_FLUSH_POLICY)
             .tier(JsonlStore::new(self.spool_dir.join(pipeline)), self.policy)
             .terminal(terminal)
     }

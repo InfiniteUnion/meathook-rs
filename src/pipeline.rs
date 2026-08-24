@@ -19,6 +19,22 @@ use crate::sink::{Sink, WindowMeta};
 /// Marker key type for pipelines without deduplication.
 pub type NoKey = ();
 
+/// What a pipeline does with its active partial window on graceful shutdown.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShutdownPolicy {
+    /// Force-deliver every buffered record, including the active partial
+    /// wall-clock window. This preserves the existing lifecycle behavior.
+    #[default]
+    FlushAll,
+    /// Deliver only closed windows and leave the active window in its store
+    /// for a later process to continue.
+    ///
+    /// This is only durable when the active records are held by a durable
+    /// store such as [`JsonlStore`](crate::JsonlStore). An active
+    /// [`MemStore`](crate::MemStore) window is lost when the process exits.
+    PreserveActiveWindow,
+}
+
 /// A collector polled on `poll_interval`, feeding a sink stack.
 ///
 /// Consecutive polls of "latest reading" APIs return repeats, so an optional
@@ -31,6 +47,7 @@ where
     collector: C,
     sink: S,
     poll_interval: Duration,
+    shutdown_policy: ShutdownPolicy,
     key_fn: Option<F>,
     seen_prev: HashSet<K>,
 }
@@ -45,6 +62,7 @@ where
             collector,
             sink,
             poll_interval,
+            shutdown_policy: ShutdownPolicy::default(),
             key_fn: None,
             seen_prev: HashSet::new(),
         }
@@ -55,6 +73,15 @@ impl<C, S, F, K> Pipeline<C, S, F, K>
 where
     C: Collector,
 {
+    /// Choose whether graceful shutdown force-flushes the active partial
+    /// window or preserves it for a later process. The default is
+    /// [`ShutdownPolicy::FlushAll`].
+    #[must_use]
+    pub fn with_shutdown_policy(mut self, shutdown_policy: ShutdownPolicy) -> Self {
+        self.shutdown_policy = shutdown_policy;
+        self
+    }
+
     /// Dedupe records across consecutive polls by the given key.
     ///
     /// Typical key for station readings: `(station_id, timestamp)`.
@@ -68,6 +95,7 @@ where
             collector: self.collector,
             sink: self.sink,
             poll_interval: self.poll_interval,
+            shutdown_policy: self.shutdown_policy,
             key_fn: Some(key_fn),
             seen_prev: HashSet::new(),
         }
@@ -81,7 +109,8 @@ where
     F: FnMut(&C::Record) -> K + Send,
     K: Eq + Hash + Send,
 {
-    /// Run until `cancel` fires, then drain the sink stack and return.
+    /// Run until `cancel` fires, then apply the configured shutdown policy
+    /// and return.
     ///
     /// Collector and sink errors are logged, never fatal: the loop keeps
     /// ticking and durable layers retry on their own cadence.
@@ -89,10 +118,10 @@ where
         let name = self.collector.name().to_owned();
         info!(pipeline = %name, interval = ?self.poll_interval, "pipeline starting");
 
-        // Trigger startup recovery in durable layers (a no-op elsewhere)
-        // before the first tick.
-        if let Err(error) = self.sink.flush().await {
-            warn!(pipeline = %name, %error, "startup flush failed");
+        // Recover closed durable windows without splitting the wall-clock
+        // window which is still active at startup.
+        if let Err(error) = self.sink.advance(OffsetDateTime::now_utc()).await {
+            warn!(pipeline = %name, %error, "startup window advancement failed");
         }
 
         let mut interval = time::interval(self.poll_interval);
@@ -105,14 +134,28 @@ where
             }
         }
 
-        info!(pipeline = %name, "pipeline shutting down; draining sink stack");
-        if let Err(error) = self.sink.flush().await {
-            error!(pipeline = %name, %error, "final flush failed; durably stored data will replay on next start");
+        let result = match self.shutdown_policy {
+            ShutdownPolicy::FlushAll => {
+                info!(pipeline = %name, "pipeline shutting down; force-draining sink stack");
+                self.sink.flush().await
+            }
+            ShutdownPolicy::PreserveActiveWindow => {
+                info!(pipeline = %name, "pipeline shutting down; preserving active wall-clock window");
+                self.sink.advance(OffsetDateTime::now_utc()).await
+            }
+        };
+        if let Err(error) = result {
+            error!(pipeline = %name, %error, "final sink lifecycle operation failed; durably stored data will replay on next start");
         }
     }
 
     async fn tick(&mut self, name: &str) {
         let start = OffsetDateTime::now_utc();
+        // This heartbeat is independent of collection success or batch
+        // size, so an idle collector still closes elapsed windows.
+        if let Err(error) = self.sink.advance(start).await {
+            warn!(pipeline = %name, %error, "window advancement failed");
+        }
         let records = match self.collector.collect().await {
             Ok(records) => records,
             Err(error) => {
@@ -245,9 +288,10 @@ mod tests {
         }
 
         let sink = SharedSink::<usize>::new();
+        let calls = Arc::new(AtomicUsize::new(0));
         let pipeline = Pipeline::new(
             Flaky {
-                calls: Arc::new(AtomicUsize::new(0)),
+                calls: Arc::clone(&calls),
             },
             sink.clone(),
             Duration::from_secs(60),
@@ -260,5 +304,48 @@ mod tests {
         handle.await.unwrap();
 
         assert_eq!(sink.records(), vec![1, 3]);
+        assert_eq!(sink.advances(), calls.load(Ordering::SeqCst) + 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn empty_polls_advance_and_preserve_shutdown_does_not_flush() {
+        struct Empty {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl Collector for Empty {
+            type Record = usize;
+            type Error = Infallible;
+
+            fn name(&self) -> &'static str {
+                "empty"
+            }
+
+            fn collect(&mut self) -> impl Future<Output = Result<Vec<usize>, Infallible>> + Send {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(vec![]))
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sink = SharedSink::<usize>::new();
+        let pipeline = Pipeline::new(
+            Empty {
+                calls: Arc::clone(&calls),
+            },
+            sink.clone(),
+            Duration::from_secs(60),
+        )
+        .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow);
+
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(pipeline.run(cancel.clone()));
+        time::sleep(Duration::from_secs(150)).await;
+        cancel.cancel();
+        handle.await.unwrap();
+
+        assert!(sink.records().is_empty());
+        assert_eq!(sink.advances(), calls.load(Ordering::SeqCst) + 2);
+        assert!(!sink.flushed());
     }
 }
