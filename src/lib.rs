@@ -24,8 +24,8 @@
 //!   [`SinkExt::tee`].
 //!
 //! Pipelines (collector + sink stack) are supervised by the [`Meathook`]
-//! runtime: one tokio task each, respawn-on-panic with backoff, and a final
-//! `flush()` through the whole stack on graceful shutdown.
+//! runtime: one tokio task each, respawn-on-panic with backoff, wall-clock
+//! advancement on every poll, and configurable [`ShutdownPolicy`] handling.
 
 pub mod collector;
 pub mod encode;
@@ -42,7 +42,7 @@ pub(crate) mod test_util;
 
 pub use collector::Collector;
 pub use layer::{FlushPolicy, SinkExt, SinkStack, Tee, TeeError, Tier, TierError};
-pub use pipeline::Pipeline;
+pub use pipeline::{Pipeline, ShutdownPolicy};
 pub use runtime::{Meathook, MeathookBuilder, RuntimeError};
 #[cfg(feature = "satay")]
 pub use satay::SatayCollector;

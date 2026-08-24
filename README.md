@@ -65,14 +65,16 @@ let sink = SinkStack::new()
 [nea-rs](https://github.com/InfiniteUnion/nea-rs), into a collector.
 
 [`Sink`] accepts records. A [`Tier`] owns its records until its [`FlushPolicy`]
-fires because the interval elapsed, the record limit was reached, or someone
-called `flush()`. Each tier uses a [`Store`]. The crate includes `MemStore` and
-the write-ahead `JsonlStore`; custom stores can use SQLite, object storage, or
-another backend. `SinkExt::tee` sends every batch to two sinks.
+fires because its UTC wall-clock window closed, the record limit was reached,
+or someone called `flush()`. `Sink::advance()` closes elapsed windows without
+forcing the current partial one. Each tier uses a [`Store`]. The crate includes
+`MemStore` and the write-ahead `JsonlStore`; custom stores can use SQLite,
+object storage, or another backend. `SinkExt::tee` sends every batch to two
+sinks.
 
 [`Meathook`] runs each pipeline in its own Tokio task. If a task panics, the
 supervisor rebuilds it from its factory and retries with exponential backoff.
-On SIGTERM or Ctrl+C, it drains each sink stack before exiting.
+On SIGTERM or Ctrl+C, each pipeline applies its configured `ShutdownPolicy`.
 
 All traits use associated error types. The built-in errors are concrete
 `thiserror` enums, with no boxed errors in the pipeline.
@@ -82,7 +84,10 @@ All traits use associated error types. The built-in errors are concrete
 ```rust,no_run
 use std::time::Duration;
 
-use meathook::{FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector, SinkStack};
+use meathook::{
+    FlushPolicy, HfSink, JsonlStore, Meathook, Pipeline, SatayCollector,
+    ShutdownPolicy, SinkStack,
+};
 use satay_reqwest::ReqwestActionExt as _;
 
 #[tokio::main]
@@ -117,6 +122,9 @@ async fn main() -> Result<(), meathook::runtime::RuntimeError> {
                 .terminal(terminal);
 
             Pipeline::new(collector, sink, Duration::from_secs(60))
+                // Keep the active UTC hour in the durable JSONL segment on
+                // graceful restart instead of uploading a partial chunk.
+                .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
                 // APIs that return the latest reading repeat data across polls.
                 .with_key_fn(|r: &MyRecord| (r.station_id.clone(), r.timestamp.clone()))
         })
@@ -130,8 +138,10 @@ Records are ordinary structs. The Parquet encoder only needs
 derives the Arrow schema from the record type.
 
 [`examples/nea_weather.rs`](examples/nea_weather.rs) is a complete example. It
-runs three NEA pipelines with an outer memory buffer, a durable JSONL spool,
-TOML configuration, and graceful shutdown.
+runs three NEA pipelines with a durable JSONL spool, TOML configuration, and
+active-window preservation across graceful restarts.
+Read the [examples guide](examples/README.md) for poll timing, UTC windowing,
+restart behavior, and shutdown policy details.
 
 ## Durability
 
@@ -147,7 +157,32 @@ data/{pipeline}/{YYYY-MM-DD}/{HH}-{MM}-{SS}-{hash}.parquet
 
 Replaying a window produces the same bytes and overwrites the same file.
 Different payloads do not collide, including sub-hourly windows and windows
-split into chunks by `max_records`.
+split into chunks by `max_records` or an explicit force-flush. One logical wall
+window can therefore contain multiple physical files.
+
+### Wall-clock windows and graceful shutdown
+
+Windows are aligned to UTC Unix-epoch boundaries. An hourly policy maps every
+record from 12:00 through 12:59 UTC to the same 12:00 segment. Pipeline startup
+and every poll call `Sink::advance()` before collection, so the first heartbeat
+at or after 13:00 delivers the closed 12:00 segment even if collection fails or
+returns no records.
+
+`ShutdownPolicy::FlushAll` is the default and immediately delivers the active
+partial window. Choose `ShutdownPolicy::PreserveActiveWindow` for a durable
+`JsonlStore` tier to retain that segment locally across a graceful restart:
+
+```rust,ignore
+Pipeline::new(collector, sink, Duration::from_secs(60))
+    .with_shutdown_policy(ShutdownPolicy::PreserveActiveWindow)
+```
+
+For example, stopping at 12:35 and restarting at 12:40 continues appending to
+the same 12:00 JSONL segment; it is delivered after 13:00. If the process never
+restarts, that partial data remains locally durable but unavailable downstream
+until an explicit `flush()`. This policy cannot preserve records held only in
+`MemStore`, so use `FlushAll` for stacks with active volatile custody or when
+immediate remote availability matters.
 
 The compression setting is therefore part of replay identity. Before changing
 an existing deployment from uncompressed parquet to zstd (or changing zstd
@@ -172,8 +207,9 @@ still in a volatile tier:
 |---|---|---|
 | SIGKILL or OOM kill | JSONL replays the batches it received; outer memory tiers disappear | Records still in outer memory, plus at most one torn JSONL record |
 | Task panic | The supervisor rebuilds the pipeline and JSONL replays its batches | Records still in volatile tiers |
-| Hugging Face returns 5xx | Segments remain on disk and retry on the next flush | None |
-| Graceful SIGTERM | The runtime drains every sink stack | None |
+| Hugging Face returns 5xx | Segments remain on disk and retry on the next advancement or flush | None |
+| Graceful SIGTERM (`FlushAll`) | The runtime force-drains every sink stack | None |
+| Graceful SIGTERM (`PreserveActiveWindow`) | Closed windows drain; the active JSONL segment stays local for restart | Active `MemStore` records if the stack uses volatile custody |
 | Spool disk is lost | Unflushed segments are gone | Everything not yet delivered; use a persistent volume on Kubernetes |
 
 ## Hugging Face sink
@@ -298,27 +334,27 @@ Secrets are read from the environment. The Hugging Face sink requires
 HF_TOKEN=hf_... cargo run --example nea_weather -- examples/meathook.toml
 ```
 
-Ctrl+C starts a graceful shutdown. The final flush moves records through the
-memory and JSONL tiers before it commits them to Hugging Face:
+Ctrl+C starts a graceful shutdown. These example pipelines use
+`PreserveActiveWindow`: closed windows are delivered, while each active UTC
+window remains in its JSONL segment for continuation after restart:
 
 ```text
 ^C INFO meathook::runtime: received ctrl-c; shutting down
-   INFO meathook::pipeline: pipeline shutting down; draining sink stack pipeline=air_temperature
-   INFO meathook::sink::huggingface: committed window to hugging face pipeline=air_temperature ...
+   INFO meathook::pipeline: pipeline shutting down; preserving active wall-clock window pipeline=air_temperature
    INFO meathook::runtime: meathook runtime stopped
 ```
 
-Successful commits remove their JSONL segment files. Pipeline directories stay
-in place, so the following command should produce no output:
+Successful commits remove closed JSONL segments. The current segment remains,
+so this command shows the locally preserved active windows:
 
 ```bash
 find ./spool-test -type f
 ```
 
-`spool-test` holds retry and crash-recovery data, not the final dataset. When
-Hugging Face rejects a window, the segment stays there and is replayed on the
-next run. The [durability section](#durability) explains what the spool covers
-and what an outer `MemStore` does not.
+`spool-test` holds active-window, retry, and crash-recovery data, not the final
+dataset. On restart, collection resumes in the current segment and closed or
+rejected segments replay deterministically. The
+[durability section](#durability) explains the custody guarantees.
 
 ## Testing
 

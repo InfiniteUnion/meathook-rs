@@ -39,8 +39,21 @@ pub trait Sink<R>: Send {
         records: Vec<R>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    /// Force-drain this layer and everything downstream (shutdown, final
-    /// flush, startup recovery).
+    /// Advance this sink to `now`, delivering windows which have closed by
+    /// that wall-clock time while retaining the current partial window.
+    ///
+    /// Terminal sinks and layers without time-based state may use this
+    /// default no-op implementation. Buffering combinators must propagate
+    /// advancement to their children.
+    fn advance(
+        &mut self,
+        _now: OffsetDateTime,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Force-drain this layer and everything downstream, including the
+    /// active partial wall-clock window.
     fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 

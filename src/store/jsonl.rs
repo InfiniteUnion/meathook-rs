@@ -23,7 +23,7 @@
 //! warning on read.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
@@ -175,9 +175,22 @@ where
             let is_new = !path.exists();
             let mut file = fs::OpenOptions::new()
                 .create(true)
+                .read(true)
                 .append(true)
                 .open(&path)
                 .map_err(|e| io_err(&path, e))?;
+            // A crash may leave a partial final JSON value without its
+            // newline. Separate it from newly appended records so the torn
+            // value is skipped on replay without swallowing the first new
+            // record into the same invalid line.
+            if file.metadata().map_err(|e| io_err(&path, e))?.len() > 0 {
+                file.seek(SeekFrom::End(-1)).map_err(|e| io_err(&path, e))?;
+                let mut last = [0];
+                file.read_exact(&mut last).map_err(|e| io_err(&path, e))?;
+                if last[0] != b'\n' {
+                    file.write_all(b"\n").map_err(|e| io_err(&path, e))?;
+                }
+            }
             file.write_all(&lines).map_err(|e| io_err(&path, e))?;
             file.sync_all().map_err(|e| io_err(&path, e))?;
             if is_new {
@@ -283,6 +296,7 @@ mod tests {
     use crate::layer::{FlushPolicy, Tier};
     use crate::sink::Sink;
     use crate::test_util::{SharedSink, meta_at};
+    use time::OffsetDateTime;
 
     fn policy() -> FlushPolicy {
         FlushPolicy::new(Duration::from_secs(3600), usize::MAX)
@@ -330,6 +344,161 @@ mod tests {
         assert_eq!(batches[1].1, vec![3]);
         // Segments are gone after a successful replay.
         assert_eq!(fs::read_dir(&store_dir).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn restart_within_window_continues_the_same_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_dir = dir.path().join("weather");
+        let inner = SharedSink::new();
+
+        {
+            let mut first = Tier::new(JsonlStore::new(&store_dir), policy(), inner.clone());
+            first
+                .ingest(&meta_at("weather", 44_400), vec![1, 2])
+                .await
+                .unwrap();
+            first
+                .advance(OffsetDateTime::from_unix_timestamp(45_300).unwrap())
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            fs::read_to_string(store_dir.join("43200.jsonl")).unwrap(),
+            "1\n2\n"
+        );
+        assert!(inner.batches().is_empty());
+
+        let mut restarted = Tier::new(JsonlStore::new(&store_dir), policy(), inner.clone());
+        restarted
+            .advance(OffsetDateTime::from_unix_timestamp(45_600).unwrap())
+            .await
+            .unwrap();
+        restarted
+            .ingest(&meta_at("weather", 45_600), vec![3])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(store_dir.join("43200.jsonl")).unwrap(),
+            "1\n2\n3\n"
+        );
+        assert!(inner.batches().is_empty());
+
+        restarted
+            .advance(OffsetDateTime::from_unix_timestamp(46_800).unwrap())
+            .await
+            .unwrap();
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0.start.unix_timestamp(), 43_200);
+        assert_eq!(batches[0].1, vec![1, 2, 3]);
+        assert!(!store_dir.join("43200.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn restart_continuation_separates_a_torn_final_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_dir = dir.path().join("weather");
+        fs::create_dir_all(&store_dir).unwrap();
+        fs::write(store_dir.join("43200.jsonl"), "1\n{\"torn").unwrap();
+
+        let inner = SharedSink::new();
+        let mut restarted = Tier::new(JsonlStore::new(&store_dir), policy(), inner.clone());
+        restarted
+            .advance(OffsetDateTime::from_unix_timestamp(45_600).unwrap())
+            .await
+            .unwrap();
+        restarted
+            .ingest(&meta_at("weather", 45_600), vec![2])
+            .await
+            .unwrap();
+        restarted
+            .advance(OffsetDateTime::from_unix_timestamp(46_800).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(inner.batches()[0].1, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn restart_after_boundary_replays_only_closed_segments() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_dir = dir.path().join("weather");
+        fs::create_dir_all(&store_dir).unwrap();
+        fs::write(store_dir.join("43200.jsonl"), "1\n").unwrap();
+        fs::write(store_dir.join("46800.jsonl"), "2\n").unwrap();
+        fs::write(store_dir.join("50400.jsonl"), "3\n").unwrap();
+
+        let inner = SharedSink::new();
+        let mut restarted = Tier::new(JsonlStore::<i32>::new(&store_dir), policy(), inner.clone());
+        restarted
+            .advance(OffsetDateTime::from_unix_timestamp(46_800).unwrap())
+            .await
+            .unwrap();
+
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0.start.unix_timestamp(), 43_200);
+        assert_eq!(batches[0].1, vec![1]);
+        assert!(!store_dir.join("43200.jsonl").exists());
+        assert!(store_dir.join("46800.jsonl").exists());
+        assert!(store_dir.join("50400.jsonl").exists());
+    }
+
+    #[tokio::test]
+    async fn restart_restores_active_count_for_max_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_dir = dir.path().join("p");
+        let inner = SharedSink::new();
+        let capped = FlushPolicy::new(Duration::from_secs(3600), 3);
+
+        {
+            let mut first = Tier::new(JsonlStore::new(&store_dir), capped, inner.clone());
+            first
+                .ingest(&meta_at("p", 44_400), vec![1, 2])
+                .await
+                .unwrap();
+        }
+
+        let mut restarted = Tier::new(JsonlStore::new(&store_dir), capped, inner.clone());
+        restarted
+            .advance(OffsetDateTime::from_unix_timestamp(45_600).unwrap())
+            .await
+            .unwrap();
+        restarted
+            .ingest(&meta_at("p", 45_600), vec![3])
+            .await
+            .unwrap();
+
+        assert_eq!(inner.batches()[0].1, vec![1, 2, 3]);
+        assert_eq!(fs::read_dir(&store_dir).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn failed_wall_advance_retains_segment_for_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_dir = dir.path().join("p");
+        fs::create_dir_all(&store_dir).unwrap();
+        fs::write(store_dir.join("43200.jsonl"), "1\n2\n").unwrap();
+
+        let inner = SharedSink::new();
+        inner.set_fail(true);
+        let mut tier = Tier::new(JsonlStore::<i32>::new(&store_dir), policy(), inner.clone());
+        assert!(
+            tier.advance(OffsetDateTime::from_unix_timestamp(46_800).unwrap())
+                .await
+                .is_err()
+        );
+        assert!(store_dir.join("43200.jsonl").exists());
+
+        inner.set_fail(false);
+        tier.advance(OffsetDateTime::from_unix_timestamp(46_900).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(inner.batches()[0].1, vec![1, 2]);
+        assert!(!store_dir.join("43200.jsonl").exists());
     }
 
     #[tokio::test]

@@ -56,12 +56,13 @@ where
 /// [`JsonlStore`](crate::JsonlStore), delete the window's `.jsonl` file)
 /// if it must be discarded.
 ///
-/// The policy is checked on each `ingest` (collector ticks are frequent
-/// compared to flush windows, so no extra timer task is needed);
-/// [`flush`](Sink::flush) force-drains. Whatever a previous run left in the
-/// store is replayed downstream on the first `ingest` or `flush` call, with
-/// [`WindowMeta`] reconstructed from the window key alone — replayed
-/// windows land at the same storage path (idempotent).
+/// [`advance`](Sink::advance) closes elapsed wall-clock windows even when a
+/// collector produces no records, while [`flush`](Sink::flush) force-drains
+/// the active partial window as well. On first use, persisted windows older
+/// than the current wall window replay downstream and the current segment's
+/// record count is restored so `max_records` still applies across restarts.
+/// Replayed [`WindowMeta`] is reconstructed from the window key alone, so
+/// replayed windows land at the same storage path (idempotent).
 pub struct Tier<R, St, S> {
     /// Backend that persists buffered records by aligned window key.
     store: St,
@@ -71,11 +72,11 @@ pub struct Tier<R, St, S> {
     inner: S,
     /// Pipeline name attached to drained window metadata.
     pipeline: Option<String>,
-    /// Whether the one-time startup replay has been attempted.
+    /// Whether the one-time startup advancement has been attempted.
     initialized: bool,
     /// Aligned Unix timestamp identifying the window currently accepting records.
     active_window: Option<i64>,
-    /// Number of records appended to the active window since it was opened.
+    /// Number of records persisted in the active window.
     active_count: usize,
     /// Associates the tier with its record type without storing a record.
     _record: PhantomData<fn() -> R>,
@@ -137,22 +138,53 @@ where
             .to_owned()
     }
 
-    /// First-use crash recovery: drain whatever a previous run left in the
-    /// store. Failures are logged, not propagated — the windows stay in the
-    /// store to be retried at the next firing, and new records must still
-    /// be appended afterwards.
-    async fn ensure_init(&mut self) {
+    /// First-use crash recovery at the supplied wall time. Failures are
+    /// logged, not propagated: retained windows retry on this ingest's drain
+    /// pass or the next lifecycle heartbeat, and new records may still be
+    /// appended when the store remains writable.
+    async fn ensure_init(&mut self, now: OffsetDateTime) {
         if self.initialized {
             return;
         }
-        self.initialized = true;
-        if let Err(error) = self.drain(true).await {
+        if let Err(error) = self.advance(now).await {
             warn!(
                 pipeline = %self.pipeline_name(),
                 %error,
-                "startup replay failed; stored windows retained for retry"
+                "startup window advancement failed; stored windows retained for retry"
             );
         }
+    }
+
+    /// Count records already persisted under `target` without committing
+    /// the segment. This restores the `max_records` safety valve after a
+    /// process restart without expanding the public [`Store`] contract.
+    async fn stored_count(&mut self, target: i64) -> Result<usize, TierError<St::Error, S::Error>> {
+        let mut cursor = None;
+        loop {
+            let Some(mut seg) = self.store.oldest(cursor).await.map_err(TierError::Store)? else {
+                return Ok(0);
+            };
+            let window = seg.window();
+            if window < target {
+                cursor = Some(window);
+                continue;
+            }
+            if window > target {
+                return Ok(0);
+            }
+            return seg
+                .records()
+                .await
+                .map(|records| records.len())
+                .map_err(TierError::Store);
+        }
+    }
+
+    async fn activate(&mut self, window: i64) -> Result<(), TierError<St::Error, S::Error>> {
+        let count = self.stored_count(window).await?;
+        self.active_window = Some(window);
+        self.active_count = count;
+        Ok(())
     }
 
     /// Drain stored windows downstream, oldest first, removing each from
@@ -160,8 +192,9 @@ where
     /// unreadable, rejected downstream, or failing removal — is retained
     /// for the next pass and does not block newer windows: the pass skips
     /// past it, attempts the rest, and returns the first error at the end.
-    /// With `include_active == false`, the currently active window is
-    /// skipped, not drained.
+    /// With `include_active == false`, the active window and any future
+    /// windows are retained; only windows strictly older than the current
+    /// aligned wall window are eligible.
     async fn drain(&mut self, include_active: bool) -> Result<(), TierError<St::Error, S::Error>> {
         // Hoisted so no `&self` method call overlaps the live segment
         // borrow below.
@@ -177,11 +210,10 @@ where
                 break;
             };
             let window = seg.window();
-            if !include_active && Some(window) == self.active_window {
-                // Still open: skip, but keep going — leftovers replayed
-                // from a previous run may be newer than the active window.
-                cursor = Some(window);
-                continue;
+            if !include_active && self.active_window.is_some_and(|active| window >= active) {
+                // Segments are ordered, so this window and everything after
+                // it is current or future custody and must remain stored.
+                break;
             }
             let records = match seg.records().await {
                 Ok(records) => records,
@@ -261,19 +293,18 @@ where
         if self.pipeline.is_none() {
             self.pipeline = Some(meta.pipeline.clone());
         }
-        self.ensure_init().await;
+        self.ensure_init(meta.end).await;
 
         if !records.is_empty() {
             let window = self.align(meta.end.unix_timestamp());
+            if self.active_window != Some(window) {
+                self.activate(window).await?;
+            }
             let count = records.len();
             self.store
                 .append(window, records)
                 .await
                 .map_err(TierError::Store)?;
-            if self.active_window != Some(window) {
-                self.active_window = Some(window);
-                self.active_count = 0;
-            }
             self.active_count += count;
         }
 
@@ -282,6 +313,21 @@ where
         } else {
             self.drain(false).await
         }
+    }
+
+    async fn advance(&mut self, now: OffsetDateTime) -> Result<(), Self::Error> {
+        self.initialized = true;
+        let current = self.align(now.unix_timestamp());
+        if self.active_window != Some(current) {
+            self.activate(current).await?;
+        }
+
+        if self.active_count >= self.policy.max_records {
+            self.drain(true).await?;
+        } else {
+            self.drain(false).await?;
+        }
+        self.inner.advance(now).await.map_err(TierError::Downstream)
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
@@ -397,6 +443,26 @@ mod tests {
         assert_eq!(batches[0].0.pipeline, "p");
         assert_eq!(batches[0].0.start.unix_timestamp(), 0);
         assert_eq!(batches[0].0.end.unix_timestamp(), 300);
+        assert_eq!(batches[0].1, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn advance_drains_a_closed_window_without_new_records() {
+        let inner = SharedSink::new();
+        let mut sink = Tier::new(
+            MemStore::new(),
+            FlushPolicy::every(Duration::from_secs(300)),
+            inner.clone(),
+        );
+
+        sink.ingest(&meta_at("p", 10), vec![1]).await.unwrap();
+        sink.advance(OffsetDateTime::from_unix_timestamp(310).unwrap())
+            .await
+            .unwrap();
+
+        let batches = inner.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0.start.unix_timestamp(), 0);
         assert_eq!(batches[0].1, vec![1]);
     }
 

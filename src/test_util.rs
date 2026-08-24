@@ -2,6 +2,7 @@
 
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use time::OffsetDateTime;
@@ -19,6 +20,7 @@ pub struct SharedSink<R = i32> {
     batches: Batches<R>,
     fail: Arc<AtomicBool>,
     flushed: Arc<AtomicBool>,
+    advances: Arc<AtomicUsize>,
 }
 
 impl<R> Clone for SharedSink<R> {
@@ -27,6 +29,7 @@ impl<R> Clone for SharedSink<R> {
             batches: Arc::clone(&self.batches),
             fail: Arc::clone(&self.fail),
             flushed: Arc::clone(&self.flushed),
+            advances: Arc::clone(&self.advances),
         }
     }
 }
@@ -38,6 +41,7 @@ impl<R> SharedSink<R> {
             batches: Arc::default(),
             fail: Arc::default(),
             flushed: Arc::default(),
+            advances: Arc::default(),
         }
     }
 
@@ -48,6 +52,11 @@ impl<R> SharedSink<R> {
     #[must_use]
     pub fn flushed(&self) -> bool {
         self.flushed.load(Ordering::SeqCst)
+    }
+
+    #[must_use]
+    pub fn advances(&self) -> usize {
+        self.advances.load(Ordering::SeqCst)
     }
 }
 
@@ -88,6 +97,19 @@ impl<R: Send + 'static> Sink<R> for SharedSink<R> {
             Err(TestSinkFailure)
         } else {
             self.flushed.store(true, Ordering::SeqCst);
+            Ok(())
+        };
+        std::future::ready(result)
+    }
+
+    fn advance(
+        &mut self,
+        _now: OffsetDateTime,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        let result = if self.fail.load(Ordering::SeqCst) {
+            Err(TestSinkFailure)
+        } else {
+            self.advances.fetch_add(1, Ordering::SeqCst);
             Ok(())
         };
         std::future::ready(result)
